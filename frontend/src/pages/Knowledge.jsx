@@ -23,6 +23,7 @@ export default function Knowledge() {
 
   const [showDocForm, setShowDocForm] = useState(false)
   const [newDocTitle, setNewDocTitle] = useState('')
+  const [newDocBlock, setNewDocBlock] = useState('')
   const [newDocContent, setNewDocContent] = useState('')
   const [newDocTags, setNewDocTags] = useState('')
 
@@ -100,11 +101,12 @@ export default function Knowledge() {
       const tags = newDocTags.split(',').map((t) => t.trim()).filter(Boolean)
       const doc = await apiFetch(`/api/knowledge/areas/${selectedArea.id}/documents`, {
         method: 'POST',
-        body: JSON.stringify({ title: newDocTitle, content: newDocContent, tags }),
+        body: JSON.stringify({ title: newDocTitle, content: newDocContent, tags, block: newDocBlock || undefined }),
       })
       setDocuments((prev) => [...prev, doc])
       setSelectedDoc(doc)
       setNewDocTitle('')
+      setNewDocBlock('')
       setNewDocContent('')
       setNewDocTags('')
       setShowDocForm(false)
@@ -139,6 +141,16 @@ export default function Knowledge() {
   if (authLoading || loading) return <div className="page-loading">Cargando…</div>
 
   const latestVersion = selectedDoc?.versions?.[selectedDoc.versions.length - 1]
+
+  // Group the area's teams (documents) by the "bloque" they belong to, so
+  // e.g. Travel Operations shows as a header over Core Operations, L1 & L2
+  // Service Desk, etc. — a team with no block set is its own standalone
+  // block (server already defaults `block` to the team's own title).
+  const documentsByBlock = documents.reduce((acc, d) => {
+    const block = d.block || d.title
+    ;(acc[block] ||= []).push(d)
+    return acc
+  }, {})
 
   return (
     <AppShell active="knowledge">
@@ -189,9 +201,15 @@ export default function Knowledge() {
         <form onSubmit={createDocument} className="card" style={{ padding: 16, marginBottom: 20 }}>
           <div className="section-title">Nuevo documento en {selectedArea.name}</div>
           <input
-            placeholder="Título"
+            placeholder="Nombre del equipo de trabajo"
             value={newDocTitle}
             onChange={(e) => setNewDocTitle(e.target.value)}
+            style={{ display: 'block', width: '100%', marginBottom: 10 }}
+          />
+          <input
+            placeholder="Bloque al que pertenece (opcional — vacío si el equipo es su propio bloque)"
+            value={newDocBlock}
+            onChange={(e) => setNewDocBlock(e.target.value)}
             style={{ display: 'block', width: '100%', marginBottom: 10 }}
           />
           <textarea
@@ -244,13 +262,18 @@ export default function Knowledge() {
         </div>
 
         <div className="kb-col">
-          {documents.map((d) => (
-            <button key={d.id} className={`kb-doc ${selectedDoc?.id === d.id ? 'on' : ''}`} onClick={() => openDoc(d)}>
-              <b>{d.title}</b>
-              <span>v{d.currentVersion || 1}</span>
-            </button>
+          {Object.entries(documentsByBlock).map(([block, docs]) => (
+            <div key={block} className="kb-block-group">
+              <div className="kb-block-label">{block}</div>
+              {docs.map((d) => (
+                <button key={d.id} className={`kb-doc ${selectedDoc?.id === d.id ? 'on' : ''}`} onClick={() => openDoc(d)}>
+                  <b>{d.title}</b>
+                  <span>v{d.currentVersion || 1}</span>
+                </button>
+              ))}
+            </div>
           ))}
-          {selectedArea && documents.length === 0 && <p className="kb-empty">Esta área aún no tiene documentos.</p>}
+          {selectedArea && documents.length === 0 && <p className="kb-empty">Esta área aún no tiene equipos de trabajo.</p>}
         </div>
 
         <div className="kb-reader">

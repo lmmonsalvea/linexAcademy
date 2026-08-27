@@ -39,6 +39,12 @@ const documentSchema = z.object({
   title: z.string().min(1),
   content: z.string().min(1),
   tags: z.array(z.string()).optional(),
+  // Groups documents within an area into the org chart's "bloque" they
+  // belong to (e.g. "Travel Operations") — each document itself is a
+  // "equipo de trabajo" (team), the actual content container. Defaults to
+  // the document's own title when omitted, i.e. a standalone team that is
+  // its own block (see seed-org-chart.js).
+  block: z.string().optional(),
 });
 
 const versionSchema = z.object({
@@ -69,6 +75,7 @@ router.get('/areas/:id/documents', asyncRoute(async (req, res) => {
       id: d.id,
       title: data.title,
       tags: data.tags || [],
+      block: data.block || data.title,
       currentVersion: data.currentVersion,
       createdAt: data.createdAt,
     };
@@ -81,13 +88,14 @@ router.get('/areas/:id/documents', asyncRoute(async (req, res) => {
 // prototype never implemented one and roles_permisos.md only describes it
 // as an aspiration).
 router.post('/areas/:id/documents', canManageContent, asyncRoute(async (req, res) => {
-  const { title, content, tags } = validate(documentSchema, req.body);
+  const { title, content, tags, block } = validate(documentSchema, req.body);
   const now = new Date().toISOString();
   const doc = {
     areaId: req.params.id,
     title,
     content,
     tags: tags || [],
+    block: block || title,
     searchTokens: computeSearchTokens({ title, content, tags }),
     versions: [{
       version: 1,

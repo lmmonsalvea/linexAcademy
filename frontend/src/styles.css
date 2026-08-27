@@ -276,6 +276,9 @@ input, select, textarea{ font-family:var(--font-display); }
 .kb-reader-body{ line-height:1.7; color:var(--text); max-width:66ch; font-size:.94rem; white-space:pre-wrap; }
 .tag-row{ display:flex; gap:6px; margin-top:16px; flex-wrap:wrap; }
 .kb-empty{ color:var(--text-dim); font-size:.88rem; padding:20px; }
+.kb-block-group{ margin-bottom:14px; }
+.kb-block-group:last-child{ margin-bottom:0; }
+.kb-block-label{ font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); padding:6px 10px 2px; }
 
 /* exams */
 .exam-row{ display:flex; align-items:center; gap:16px; padding:18px; border-radius:12px; margin-bottom:10px; flex-wrap:wrap; }
