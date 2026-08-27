@@ -1,0 +1,88 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:14
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: moodle
+      POSTGRES_PASSWORD: moodle
+      POSTGRES_DB: moodle
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  moodle:
+    image: bitnami/moodle:4
+    depends_on:
+      - postgres
+    environment:
+      MOODLE_USERNAME: admin
+      MOODLE_PASSWORD: adminpassword
+      MOODLE_DATABASE_HOST: postgres
+      MOODLE_DATABASE_USER: moodle
+      MOODLE_DATABASE_NAME: moodle
+      MOODLE_DATABASE_PASSWORD: moodle
+    ports:
+      - '8080:8080'
+    volumes:
+      - moodle_data:/bitnami/moodle
+
+  mongo:
+    image: mongo:6
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - '27017:27017'
+
+  knowledge_center:
+    build: ./knowledge_center
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: mongodb://mongo:27017/knowledge
+      JWT_SECRET: devsecret
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./knowledge_center:/usr/src/app
+
+  exams_service:
+    build: ./exams_service
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: mongodb://mongo:27017/exams
+      JWT_SECRET: devsecret
+    ports:
+      - '4000:4000'
+    volumes:
+      - ./exams_service:/usr/src/app
+
+  auth_service:
+    build: ./auth_service
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: mongodb://mongo:27017/auth
+      JWT_SECRET: devsecret
+    ports:
+      - '5000:5000'
+    volumes:
+      - ./auth_service:/usr/src/app
+
+  courses_service:
+    build: ./courses_service
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: mongodb://mongo:27017/courses
+      JWT_SECRET: devsecret
+    ports:
+      - '7000:7000'
+    volumes:
+      - ./courses_service:/usr/src/app
+
+volumes:
+  postgres_data:
+  moodle_data:
+  mongo_data:
