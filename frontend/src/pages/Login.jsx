@@ -1,37 +1,42 @@
 import React, { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import Logo from '../components/Logo'
+import { useAuth } from '../utils/auth'
 
-export default function Login(){
+export default function Login() {
   const navigate = useNavigate()
-  const [email,setEmail]=useState('')
-  const [password,setPassword]=useState('')
-  const [msg,setMsg]=useState('')
+  const location = useLocation()
+  const { signInWithMicrosoft } = useAuth()
+  const [error, setError] = useState(location.state?.deniedReason || '')
+  const [loading, setLoading] = useState(false)
 
-  const submit=async e=>{
-    e.preventDefault()
-    const res=await fetch('http://localhost:5000/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password})})
-    const j=await res.json()
-    if(res.ok){
-      localStorage.setItem('token',j.token)
+  const handleSignIn = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      await signInWithMicrosoft()
       navigate('/')
-    } else setMsg(j.error||'Error')
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user') {
+        setError('No se pudo iniciar sesión con Microsoft. Intenta de nuevo.')
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
     <div className="auth-screen">
       <div className="auth-box">
         <Logo />
-        <div className="auth-tabs">
-          <span className="on">Iniciar sesión</span>
-          <Link to="/register">Crear cuenta</Link>
-        </div>
-        <form onSubmit={submit}>
-          <div className="field"><label>Correo corporativo</label><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="tu.nombre@ultragroupla.com" /></div>
-          <div className="field"><label>Contraseña</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} /></div>
-          <button className="btn btn-primary btn-block">Entrar</button>
-        </form>
-        {msg && <p className="auth-msg">{msg}</p>}
+        <p style={{ textAlign: 'center', color: 'var(--text-dim)', margin: '8px 0 20px' }}>
+          Inicia sesión con tu cuenta corporativa de Microsoft
+          <br />(@ultragroupla.com o @linextravel.com)
+        </p>
+        <button className="btn btn-primary btn-block" onClick={handleSignIn} disabled={loading}>
+          {loading ? 'Conectando…' : 'Iniciar sesión con Microsoft'}
+        </button>
+        {error && <p className="auth-msg">{error}</p>}
         <p className="auth-links"><Link to="/">← Volver al inicio</Link></p>
       </div>
     </div>

@@ -16,9 +16,10 @@ Plataforma interna para ~200 empleados, en español, con funcionalidades de LMS,
 
 ## Historias de usuario (priorizadas)
 
-1) Registro / Login
-- Como empleado, quiero registrarme con mi correo corporativo para acceder a la plataforma.
-- Criterios de aceptación: solo se aceptan dominios `@ultragroupla.com` y `@linextravel.com`; se envía correo de verificación; contraseña mínima 8 caracteres, una mayúscula, un número.
+1) Registro / Login — implementado vía Microsoft/Entra ID SSO (no contraseña propia)
+- Como empleado, quiero iniciar sesión con mi cuenta corporativa de Microsoft para acceder a la plataforma, sin crear ni recordar otra contraseña.
+- Implementación real: Firebase Auth con el proveedor nativo `microsoft.com`, sobre el App Registration de Entra ID ya compartido en el proyecto `linexrewards-app` (tenant de Ultragroup) — ver `docs/org-context.md` y `.claude/skills/connect-entra-id-firebase-auth/`. No existe registro con contraseña ni correo de verificación propio: la identidad la garantiza Microsoft.
+- Criterios de aceptación: solo se aprovisionan automáticamente cuentas con dominio `@ultragroupla.com`, `@linextravel.com` o `@linex-loyalty.com` (ver `roles_permisos.md`); cualquier otro dominio recibe un 403 al primer intento de login. El primer superadmin se asigna manualmente (`backend/scripts/bootstrap-superadmin.js`), el resto de roles vía el panel `/admin`.
 
 2) Roles y permisos
 - Como Admin Área, quiero asignar permisos y publicar documentos de mi área.
@@ -60,11 +61,13 @@ Plataforma interna para ~200 empleados, en español, con funcionalidades de LMS,
 - Logs y auditoría: cambios en permisos y evaluaciones auditables.
 
 ## Entregables MVP
-- Entorno dev local con Moodle + Postgres + Mongo + microservicio centro de conocimiento.
-- Frontend básico (login, catálogo, vista curso, conocimientos por área).
-- Soporte SCORM simple y reproducción de vídeo.
-- Sistema de roles y permisos básicos (incluye Admin RRHH y Admin Área).
-- Integración manual con Teams (enlaces a reuniones y subida manual de grabaciones).
+
+- ~~Entorno dev local con Moodle + Postgres + Mongo~~ — reemplazado: backend
+  consolidado (`backend/`) sobre Firestore + Firebase Auth, ver `README_DEV.md`.
+- Frontend (login con Microsoft SSO, catálogo, vista curso, conocimientos por área) — implementado en `frontend/`.
+- Soporte SCORM simple y reproducción de vídeo — módulos de curso soportan tipo `scorm`/`video` como enlace externo; no incluye un reproductor SCORM embebido (roadmap).
+- Sistema de roles y permisos — implementado (incluye Admin RRHH y Admin Área), con panel de administración de roles en `/admin`.
+- Integración manual con Teams (enlaces a reuniones y subida manual de grabaciones) — pendiente, no implementado en esta iteración.
 
 ---
 

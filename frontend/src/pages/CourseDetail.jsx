@@ -1,54 +1,71 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { useParams, useNavigate, Navigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
-import { getCurrentUser, authHeader } from '../utils/auth'
+import { apiFetch, apiFetchBlob } from '../utils/api'
 
-const API = 'http://localhost:7000'
 const MODULE_ICON = { video: '▶', pdf: '📄', scorm: '🧩', quiz: '📝' }
 const MODULE_LABEL = { video: 'Vídeo', pdf: 'PDF · lectura', scorm: 'Paquete SCORM', quiz: 'Quiz' }
 
 export default function CourseDetail(){
   const { id } = useParams()
   const navigate = useNavigate()
-  const user = getCurrentUser()
-  const userId = user ? (user.email || user.sub) : null
-  const token = localStorage.getItem('token')
 
   const [course, setCourse] = useState(null)
-  const [progress, setProgress] = useState({ completedModules: [], percent: 0 })
+  const [error, setError] = useState('')
+  const [enrolling, setEnrolling] = useState(false)
+  const [downloading, setDownloading] = useState(false)
 
-  const loadProgress = useCallback(() => {
-    if (!userId) return
-    fetch(`${API}/courses/${id}/progress/${encodeURIComponent(userId)}`, { headers: authHeader() })
-      .then(r => r.json()).then(setProgress).catch(() => {})
-  }, [id, userId])
-
-  useEffect(() => {
-    fetch(`${API}/courses/${id}`).then(r => r.json()).then(setCourse).catch(() => {})
+  const load = useCallback(() => {
+    apiFetch(`/api/courses/${id}`)
+      .then(setCourse)
+      .catch(err => setError(err.message))
   }, [id])
 
-  useEffect(() => {
-    if (!userId) return
-    fetch(`${API}/courses/${id}/enroll`, {
-      method: 'POST', headers: { 'content-type': 'application/json', ...authHeader() }
-    }).then(loadProgress).catch(() => {})
-  }, [id, userId, loadProgress])
+  useEffect(() => { load() }, [load])
 
-  const completeModule = async (moduleId) => {
-    if (!userId) return
-    await fetch(`${API}/courses/${id}/progress`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...authHeader() },
-      body: JSON.stringify({ moduleId })
-    })
-    loadProgress()
+  const enroll = async () => {
+    setEnrolling(true)
+    try {
+      await apiFetch(`/api/courses/${id}/enroll`, { method: 'POST' })
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setEnrolling(false)
+    }
   }
 
-  if (!user) return <Navigate to="/login" replace />
-  if (!course) return <AppShell active="courses"><p>Cargando curso...</p></AppShell>
+  const completeModule = async (moduleId) => {
+    try {
+      await apiFetch(`/api/courses/${id}/progress`, {
+        method: 'POST',
+        body: JSON.stringify({ moduleId })
+      })
+      await load()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
-  const isDone = m => progress.completedModules.includes(m._id)
+  const downloadCertificate = async () => {
+    setDownloading(true)
+    try {
+      const blob = await apiFetchBlob(`/api/courses/${id}/certificate`)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank', 'noreferrer')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  if (!course) return <AppShell active="courses"><div className="page-loading">Cargando curso…</div></AppShell>
+
+  const progress = course.progress || { completedModules: [], percent: 0, totalModules: course.modules.length }
+  const isDone = m => progress.completedModules.includes(m.id)
   const percent = progress.percent || 0
+  const isEnrolled = !!course.enrolled
 
   return (
     <AppShell active="courses">
@@ -60,15 +77,27 @@ export default function CourseDetail(){
         <div className="meta">
           <span>🎬 {course.modules.length} módulos</span>
           {course.area && <span>🏷 {course.area}</span>}
-          {course.instructorId && <span>👤 {course.instructorId}</span>}
+          {course.instructorEmail && <span>👤 {course.instructorEmail}</span>}
         </div>
+        {!isEnrolled && (
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={enroll} disabled={enrolling}>
+            {enrolling ? 'Inscribiendo…' : 'Inscribirme'}
+          </button>
+        )}
       </div>
+
+      {error && <div className="info-note" style={{ margin: '16px 0' }}><span>{error}</span></div>}
 
       <div className="detail-grid">
         <div>
           <div className="section-title">Módulos</div>
+          {isEnrolled && (
+            <div className="progress-track" style={{ marginBottom: 16 }}>
+              <div className="progress-fill" style={{ width: `${percent}%` }} />
+            </div>
+          )}
           {course.modules.map((m, i) => (
-            <div key={m._id} className={`module-row ${isDone(m) ? 'done' : 'current'}`}>
+            <div key={m.id} className={`module-row ${isDone(m) ? 'done' : isEnrolled ? 'current' : 'locked'}`}>
               <div className="module-ic">{MODULE_ICON[m.type] || '•'}</div>
               <div className="txt">
                 <b>{i + 1}. {m.title}</b>
@@ -90,8 +119,10 @@ export default function CourseDetail(){
 
               {isDone(m) ? (
                 <span className="pill pill-success">Completado</span>
+              ) : isEnrolled ? (
+                <button className="btn btn-ghost btn-sm" onClick={() => completeModule(m.id)}>Marcar como completado</button>
               ) : (
-                <button className="btn btn-ghost btn-sm" onClick={() => completeModule(m._id)}>Marcar como completado</button>
+                <span className="pill pill-locked">Inscríbete para avanzar</span>
               )}
             </div>
           ))}
@@ -104,11 +135,9 @@ export default function CourseDetail(){
             {percent === 100 ? (
               <>
                 <p style={{ color: 'var(--text-dim)', fontSize: '.86rem', marginBottom: 16 }}>¡Completaste el curso! Tu certificado ya está disponible.</p>
-                <a
-                  className="btn btn-primary btn-sm"
-                  href={`${API}/courses/${id}/certificate/${encodeURIComponent(userId)}?token=${encodeURIComponent(token)}`}
-                  target="_blank" rel="noreferrer"
-                >Descargar certificado</a>
+                <button className="btn btn-primary btn-sm" onClick={downloadCertificate} disabled={downloading}>
+                  {downloading ? 'Generando…' : 'Descargar certificado'}
+                </button>
               </>
             ) : (
               <>

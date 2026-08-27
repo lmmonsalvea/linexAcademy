@@ -1,78 +1,131 @@
-# Entorno de desarrollo local — Plataforma eLearning
+# linexAcademy — entorno de desarrollo
 
-Estos pasos configuran un entorno local mínimo para desarrollo y pruebas: Moodle (bitnami), PostgreSQL, MongoDB y un servicio simple para el centro de conocimiento.
+Plataforma interna de eLearning para Linex Travel / UltraGroup, desplegada sobre
+la infraestructura compartida de la organización (proyecto Firebase/GCP
+`linexrewards-app`, ver `docs/org-context.md`).
 
-Requisitos: Docker y Docker Compose instalados en tu máquina.
+## Arquitectura
 
-Iniciar el entorno:
+- **Frontend**: React + Vite (`frontend/`), servido como sitio estático desde
+  **Firebase Hosting**.
+- **Backend**: Express (`backend/`), un único servicio consolidado (ya no 4
+  microservicios separados) desplegado en **Cloud Run**.
+- **Base de datos**: Firestore, base nombrada `linex-academy` dentro del
+  proyecto compartido `linexrewards-app` (no la base `(default)` — ver
+  `docs/org-context.md`, cada app del proyecto tiene la suya).
+- **Autenticación**: Firebase Auth con el proveedor nativo de Microsoft, sobre
+  el App Registration de Entra ID ya configurado en `linexrewards-app` para el
+  tenant de Ultragroup (dominios `ultragroupla.com`, `linextravel.com`,
+  `linex-loyalty.com`). No hay registro con contraseña — el login es SSO
+  corporativo real. Ver `.claude/skills/connect-entra-id-firebase-auth/`.
+
+El prototipo anterior (Moodle + Postgres + Mongo + JWT propio, 4 servicios
+separados) fue reemplazado por completo; su lógica de negocio se migró a este
+backend, pero el código viejo ya no existe (queda en el historial de git del
+primer commit si hace falta consultarlo).
+
+## Requisitos
+
+- Node.js 20+, `gh`, `firebase-tools` (ver `docs/required-tools.md`).
+- `gcloud` CLI — necesario para desplegar el backend en Cloud Run (no
+  requerido solo para desarrollo local).
+- Acceso al proyecto Firebase `linexrewards-app` (`firebase login`).
+
+## Desarrollo local
+
+1. **Backend**
+   ```bash
+   cd backend
+   npm install
+   cp .env.example .env   # ajustar si hace falta
+   gcloud auth application-default login   # una vez, para que el Admin SDK tenga credenciales
+   npm run dev
+   ```
+   Escucha en `http://localhost:8081`.
+
+2. **Frontend**
+   ```bash
+   cd frontend
+   npm install
+   cp .env.example .env.local   # completar VITE_FIREBASE_API_KEY / VITE_FIREBASE_APP_ID desde
+                                  # Firebase Console > linexrewards-app > Project settings > tu app web
+   npm run dev
+   ```
+   Abre `http://localhost:5173`.
+
+3. **Datos de ejemplo** (opcional, siembra cursos/documentos/preguntas en
+   Firestore directamente):
+   ```bash
+   cd backend
+   node scripts/seed-demo-data.js
+   ```
+
+4. **Primer superadmin**: inicia sesión una vez con tu cuenta corporativa
+   (quedas como `empleado` por defecto), luego:
+   ```bash
+   cd backend
+   node scripts/bootstrap-superadmin.js tu.correo@ultragroupla.com
+   ```
+   Desde ahí, usa el panel `/admin` para asignar el resto de roles.
+
+## Despliegue
+
+### Backend (Cloud Run)
 
 ```bash
-cd "c:\Users\lmmonsalvea\OneDrive - Ultragroup\Escritorio\eLearning"
-docker compose up -d --build
+cd backend
+gcloud run deploy linexacademy-backend \
+  --source . \
+  --region=us-east4 \
+  --project=linexrewards-app \
+  --allow-unauthenticated \
+  --set-env-vars=FIRESTORE_DATABASE_ID=linex-academy,CORS_ORIGINS=https://<tu-dominio-de-hosting>
 ```
 
-Servicios:
-- Moodle: http://localhost:8080 (usuario `admin` y contraseña `adminpassword` por defecto en dev)
-- Knowledge Center API: http://localhost:3000
-- PostgreSQL: puerto local 5432 (dentro del contenedor postgres)
-- MongoDB: puerto local 27017
+El servicio usa Application Default Credentials en Cloud Run automáticamente
+— no hay clave de service account que gestionar (ver
+`docs/org-context.md`, `iam.disableServiceAccountKeyCreation`). La cuenta de
+servicio del servicio necesita permisos de Firestore/Auth sobre el proyecto
+(`roles/datastore.user` como mínimo) — ver `.claude/skills/manage-team-permissions/`.
 
-Notas:
-- Este entorno es para desarrollo/demo únicamente. Cambia credenciales y variables de entorno antes de pasar a producción.
-- Para integración con Teams (Graph API) necesitarás registrar una aplicación en Azure AD y proporcionar credenciales de aplicación; por seguridad no se colocan en este repo.
-
-Detener el entorno:
+### Frontend (Firebase Hosting)
 
 ```bash
-docker compose down
+cd frontend
+npm run build
+cd ..
+firebase deploy --only hosting --project=linexrewards-app
 ```
 
-Ejecutar servicios sin Docker (opcional, útil si Docker no está instalado):
+### Base de datos y reglas
 
-1) Auth Service
+Ya provisionadas: base Firestore nombrada `linex-academy` y reglas
+`firestore.rules` (deny-all — todo el acceso pasa por el backend, ningún
+cliente habla directo con Firestore). Para volver a desplegar las reglas tras
+un cambio:
 ```bash
-cd auth_service
-npm install
-npm start
+firebase deploy --only firestore:rules --project=linexrewards-app
 ```
 
-2) Exams Service
-```bash
-cd exams_service
-npm install
-npm start
-```
+## Pendiente de configurar manualmente (requiere decisiones/permisos que no se automatizan desde aquí)
 
-3) Knowledge Center
-```bash
-cd knowledge_center
-npm install
-npm start
-```
+Ver el mensaje de la conversación donde se generó este cambio para el
+checklist exacto — en resumen: habilitar Identity Platform en
+`linexrewards-app` si no está, agregar el dominio de Hosting a "Authorized
+domains" en Firebase Auth, crear el servicio de Cloud Run la primera vez, y
+asignar el primer superadmin.
 
-Arranca el frontend (ver `frontend/README_FRONTEND.md`) y abre `http://localhost:5173`.
+## API (backend, todo bajo `/api`, requiere `Authorization: Bearer <Firebase ID token>`)
 
-APIs disponibles en desarrollo:
-
-- Knowledge Center:
-	- `GET /areas` — listar áreas
-	- `POST /areas` — crear área
-	- `GET /areas/:id/documents` — listar documentos por área
-	- `POST /areas/:id/documents` — crear documento
-	- `GET /search?q=...` — búsqueda simple por título/contenido
-
-- Exams Service (dev):
-	- `POST /questions` — crear pregunta (body: text, type, options, answer)
-	- `GET /questions` — listar preguntas
-	- `POST /templates` — crear plantilla
-	- `GET /templates` — listar plantillas
-	- `POST /tests` — crear instancia de test (body: templateId, userId)
-	- `POST /tests/:id/submit` — enviar respuestas
-	- `GET /tests/:id/result` — ver resultado
-
-- Auth Service (dev):
-	- `POST /register` — registrar usuario (dev devuelve verifyToken)
-	- `GET /verify?token=...` — verificar cuenta (dev)
-	- `POST /login` — autenticarse, devuelve JWT
-	- `GET /me` — obtener datos del token
-
+- `GET /api/session/me` — perfil + rol del usuario autenticado.
+- `GET /api/users`, `PATCH /api/users/:uid/role` — administración de roles (superadmin).
+- `GET/POST /api/courses`, `GET /api/courses/:id`, `POST /api/courses/:id/modules`,
+  `POST /api/courses/:id/enroll`, `POST /api/courses/:id/progress`,
+  `GET /api/courses/:id/progress/:uid`, `GET /api/courses/:id/certificate`.
+- `GET/POST /api/knowledge/areas`, `GET/POST /api/knowledge/areas/:id/documents`,
+  `GET /api/knowledge/documents/:id`, `POST /api/knowledge/documents/:id/version`,
+  `GET /api/knowledge/search?q=`.
+- `GET/POST /api/exams/questions`, `GET/POST /api/exams/templates`,
+  `POST /api/exams/tests`, `POST /api/exams/tests/:id/submit`,
+  `GET /api/exams/tests/:id/result`, `GET /api/exams/tests?mine=true`,
+  `GET /api/exams/tests/:id/export.csv`, `GET /api/exams/tests/report?templateId=`.

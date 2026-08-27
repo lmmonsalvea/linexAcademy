@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
-import { getCurrentUser } from '../utils/auth'
+import { useAuth } from '../utils/auth'
+import { apiFetch } from '../utils/api'
 
 const COVERS = [
   'linear-gradient(135deg,#5B5CFF,#6D28D9)',
@@ -15,16 +16,32 @@ const COVERS = [
 const canCreate = role => ['instructor', 'admin_area', 'superadmin'].includes(role)
 
 export default function Courses(){
-  const user = getCurrentUser()
+  const { profile } = useAuth()
   const navigate = useNavigate()
-  const [courses, setCourses] = useState([])
+  const [courses, setCourses] = useState(null)
   const [areaFilter, setAreaFilter] = useState(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('http://localhost:7000/courses').then(r => r.json()).then(setCourses).catch(() => {})
+    let cancelled = false
+    apiFetch('/api/courses')
+      .then(({ courses }) => { if (!cancelled) setCourses(courses) })
+      .catch(err => { if (!cancelled) setError(err.message) })
+    return () => { cancelled = true }
   }, [])
 
-  if (!user) return <Navigate to="/login" replace />
+  const handleEnroll = async (courseId) => {
+    try {
+      await apiFetch(`/api/courses/${courseId}/enroll`, { method: 'POST' })
+      setCourses(prev => prev.map(c => c.id === courseId ? { ...c, enrolled: true } : c))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  if (courses === null) {
+    return <AppShell active="courses"><div className="page-loading">Cargando cursos…</div></AppShell>
+  }
 
   const areas = [...new Set(courses.map(c => c.area).filter(Boolean))]
   const visible = areaFilter ? courses.filter(c => c.area === areaFilter) : courses
@@ -39,12 +56,14 @@ export default function Courses(){
             <span>Cualquier persona puede inscribirse y avanzar a su ritmo. Al completar todos los módulos se habilita el certificado descargable.</span>
           </div>
         </div>
-        {canCreate(user.role) && (
+        {canCreate(profile?.role) && (
           <div className="panel-head-actions">
             <button className="btn btn-primary" onClick={() => navigate('/courses/new')}>+ Crear curso</button>
           </div>
         )}
       </div>
+
+      {error && <div className="info-note" style={{ margin: '16px 0' }}><span>{error}</span></div>}
 
       {areas.length > 0 && (
         <div className="chip-row">
@@ -57,16 +76,25 @@ export default function Courses(){
 
       <div className="course-grid">
         {visible.map((c, i) => (
-          <Link to={`/courses/${c._id}`} key={c._id} className="card course-card" style={{ textDecoration: 'none' }}>
-            <div className="course-cover" style={{ background: COVERS[i % COVERS.length] }}>
-              {c.area && <span className="tag">{c.area}</span>}
+          <div key={c.id} className="card course-card">
+            <Link to={`/courses/${c.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+              <div className="course-cover" style={{ background: COVERS[i % COVERS.length] }}>
+                {c.area && <span className="tag">{c.area}</span>}
+              </div>
+              <div className="course-body">
+                <h3>{c.title}</h3>
+                {c.description && <span className="course-meta"><span>{c.description}</span></span>}
+                <span className="course-meta"><span>🎬 {c.modules.length} módulo{c.modules.length === 1 ? '' : 's'}</span></span>
+              </div>
+            </Link>
+            <div style={{ padding: '0 18px 18px' }}>
+              {c.enrolled ? (
+                <span className="pill pill-success">Inscrito</span>
+              ) : (
+                <button className="btn btn-primary btn-sm btn-block" onClick={() => handleEnroll(c.id)}>Inscribirme</button>
+              )}
             </div>
-            <div className="course-body">
-              <h3>{c.title}</h3>
-              {c.description && <span className="course-meta"><span>{c.description}</span></span>}
-              <span className="course-meta"><span>🎬 {c.modules.length} módulo{c.modules.length === 1 ? '' : 's'}</span></span>
-            </div>
-          </Link>
+          </div>
         ))}
         {visible.length === 0 && <p style={{ color: 'var(--text-dim)' }}>Aún no hay cursos publicados.</p>}
       </div>

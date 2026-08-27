@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { getCurrentUser } from '../utils/auth'
+import { useAuth } from '../utils/auth'
 import Logo from './Logo'
 
 const ROLE_LABELS = {
@@ -20,17 +20,19 @@ const NAV = [
 ]
 
 function initialsOf(user) {
-  const base = user?.name || user?.email || '??'
+  const base = user?.displayName || user?.email || '??'
   return base.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
 }
 
 export default function AppShell({ active, children }) {
   const navigate = useNavigate()
-  const user = getCurrentUser()
+  const { profile, signOut } = useAuth()
+  const user = profile
   const canSeeRRHH = ['admin_rrhh', 'superadmin'].includes(user?.role)
+  const canSeeAdmin = user?.role === 'superadmin'
 
-  const logout = () => {
-    localStorage.removeItem('token')
+  const logout = async () => {
+    await signOut()
     navigate('/')
   }
 
@@ -52,6 +54,15 @@ export default function AppShell({ active, children }) {
                 <circle cx="9" cy="9" r="3.4" />
               </svg>
               Panel RRHH
+            </Link>
+          )}
+          {canSeeAdmin && (
+            <Link to="/admin" className={`nav-item ${active === 'admin' ? 'on' : ''}`}>
+              <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z" />
+              </svg>
+              Administración
             </Link>
           )}
         </nav>

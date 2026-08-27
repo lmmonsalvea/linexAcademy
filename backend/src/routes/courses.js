@@ -1,0 +1,231 @@
+const express = require('express');
+const crypto = require('crypto');
+const { z } = require('zod');
+const { db } = require('../firebaseAdmin');
+const { requireRole } = require('../middleware/auth');
+const { validate } = require('../lib/validate');
+const { asyncRoute } = require('../middleware/errorHandler');
+const { renderCertificate } = require('../lib/certificate');
+
+const router = express.Router();
+
+const MODULE_TYPES = ['video', 'pdf', 'scorm', 'quiz'];
+
+// Who may view someone else's progress/certificate — ported from
+// courses_service/index.js `canViewOtherProgress`.
+const canViewOthersProgress = (role) =>
+  ['instructor', 'admin_area', 'admin_rrhh', 'superadmin'].includes(role);
+
+const moduleInputSchema = z.object({
+  type: z.enum(MODULE_TYPES),
+  title: z.string().trim().min(1, 'El título del módulo es obligatorio'),
+  url: z.string().trim().optional().nullable(),
+});
+
+const createCourseSchema = z.object({
+  title: z.string().trim().min(1, 'El título del curso es obligatorio'),
+  description: z.string().trim().optional(),
+  area: z.string().trim().optional().nullable(),
+  modules: z.array(moduleInputSchema).optional(),
+});
+
+const progressSchema = z.object({
+  moduleId: z.string().min(1, 'Falta moduleId'),
+});
+
+function buildModule(input, order) {
+  return {
+    id: crypto.randomUUID(),
+    type: input.type,
+    title: input.title,
+    url: input.url || null,
+    order,
+  };
+}
+
+function computeProgress(modules, completedModules) {
+  const total = (modules || []).length;
+  const completed = completedModules || [];
+  const percent = total === 0 ? 0 : Math.round((completed.length / total) * 100);
+  return { completedModules: completed, percent, totalModules: total };
+}
+
+const courseRef = (id) => db.collection('courses').doc(id);
+const enrollmentRef = (courseId, uid) => courseRef(courseId).collection('enrollments').doc(uid);
+
+async function getCourseOr404(id) {
+  const snap = await courseRef(id).get();
+  if (!snap.exists) throw { status: 404, message: 'Curso no encontrado' };
+  return { id: snap.id, ...snap.data() };
+}
+
+function courseSummary(course) {
+  return {
+    id: course.id,
+    title: course.title,
+    description: course.description || '',
+    area: course.area || null,
+    modules: course.modules || [],
+  };
+}
+
+// 1. Create a course.
+router.post('/', requireRole('instructor', 'admin_area', 'superadmin'), asyncRoute(async (req, res) => {
+  const data = validate(createCourseSchema, req.body);
+  const modules = (data.modules || []).map((m, i) => buildModule(m, i));
+  const course = {
+    title: data.title,
+    description: data.description || '',
+    area: data.area || null,
+    modules,
+    instructorUid: req.user.uid,
+    instructorEmail: req.user.email,
+    createdAt: new Date().toISOString(),
+  };
+  const ref = await db.collection('courses').add(course);
+  res.json({ id: ref.id });
+}));
+
+// 2. Catalog / "my courses" — the frontend Dashboard already depends on the
+// exact shape of the `mine=true` branch, do not change it.
+router.get('/', asyncRoute(async (req, res) => {
+  const snap = await db.collection('courses').get();
+  const courses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  if (req.query.mine === 'true') {
+    const results = [];
+    for (const course of courses) {
+      const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
+      if (!enrollSnap.exists) continue;
+      results.push({
+        ...courseSummary(course),
+        progress: computeProgress(course.modules, enrollSnap.data().completedModules),
+      });
+    }
+    return res.json({ courses: results });
+  }
+
+  const filtered = req.query.area ? courses.filter((c) => c.area === req.query.area) : courses;
+  const results = [];
+  for (const course of filtered) {
+    const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
+    results.push({ ...courseSummary(course), enrolled: enrollSnap.exists });
+  }
+  res.json({ courses: results });
+}));
+
+// 3. Single course + the current user's own progress.
+router.get('/:id', asyncRoute(async (req, res) => {
+  const course = await getCourseOr404(req.params.id);
+  const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
+  const completedModules = enrollSnap.exists ? enrollSnap.data().completedModules || [] : [];
+  res.json({
+    ...courseSummary(course),
+    instructorUid: course.instructorUid || null,
+    instructorEmail: course.instructorEmail || null,
+    // Not in the original spec's response shape, but CourseDetail.jsx needs
+    // it to decide whether to show "Inscribirme" vs the progress UI — percent
+    // alone can't distinguish "enrolled, 0% done" from "not enrolled".
+    enrolled: enrollSnap.exists,
+    progress: computeProgress(course.modules, completedModules),
+  });
+}));
+
+// 4. Append a module to an existing course.
+router.post('/:id/modules', requireRole('instructor', 'admin_area', 'superadmin'), asyncRoute(async (req, res) => {
+  const data = validate(moduleInputSchema, req.body);
+  const course = await getCourseOr404(req.params.id);
+  const modules = course.modules || [];
+  const newModule = buildModule(data, modules.length);
+  await courseRef(course.id).update({ modules: [...modules, newModule] });
+  res.json(newModule);
+}));
+
+// 5. Enroll — idempotent.
+router.post('/:id/enroll', asyncRoute(async (req, res) => {
+  const course = await getCourseOr404(req.params.id);
+  const ref = enrollmentRef(course.id, req.user.uid);
+  const snap = await ref.get();
+  if (snap.exists) {
+    return res.json(snap.data());
+  }
+  const enrollment = {
+    uid: req.user.uid,
+    email: req.user.email,
+    completedModules: [],
+    enrolledAt: new Date().toISOString(),
+    completedAt: null,
+  };
+  await ref.set(enrollment);
+  res.json(enrollment);
+}));
+
+// 6. Mark a module completed — auto-enrolls if needed (forgiving behavior
+// ported from the old prototype's upsert).
+router.post('/:id/progress', asyncRoute(async (req, res) => {
+  const { moduleId } = validate(progressSchema, req.body);
+  const course = await getCourseOr404(req.params.id);
+  const modules = course.modules || [];
+  if (!modules.some((m) => m.id === moduleId)) {
+    throw { status: 400, message: 'El módulo no pertenece a este curso' };
+  }
+
+  const ref = enrollmentRef(course.id, req.user.uid);
+  const snap = await ref.get();
+  const existing = snap.exists
+    ? snap.data()
+    : {
+        uid: req.user.uid,
+        email: req.user.email,
+        completedModules: [],
+        enrolledAt: new Date().toISOString(),
+        completedAt: null,
+      };
+
+  const completedModules = [...new Set([...(existing.completedModules || []), moduleId])];
+  const isComplete = modules.length > 0 && completedModules.length === modules.length;
+
+  await ref.set({
+    ...existing,
+    completedModules,
+    completedAt: isComplete ? existing.completedAt || new Date().toISOString() : null,
+  });
+
+  res.json(computeProgress(modules, completedModules));
+}));
+
+// 7. View a specific user's progress.
+router.get('/:id/progress/:uid', asyncRoute(async (req, res) => {
+  const targetUid = req.params.uid;
+  if (targetUid !== req.user.uid && !canViewOthersProgress(req.user.role)) {
+    throw { status: 403, message: 'No tienes permisos para ver este progreso' };
+  }
+  const course = await getCourseOr404(req.params.id);
+  const enrollSnap = await enrollmentRef(course.id, targetUid).get();
+  const completedModules = enrollSnap.exists ? enrollSnap.data().completedModules || [] : [];
+  res.json(computeProgress(course.modules, completedModules));
+}));
+
+// 8. Certificate — only once fully completed.
+router.get('/:id/certificate', asyncRoute(async (req, res) => {
+  const targetUid = req.query.uid || req.user.uid;
+  if (targetUid !== req.user.uid && !canViewOthersProgress(req.user.role)) {
+    throw { status: 403, message: 'No tienes permisos para ver este certificado' };
+  }
+  const course = await getCourseOr404(req.params.id);
+  const modules = course.modules || [];
+  const enrollSnap = await enrollmentRef(course.id, targetUid).get();
+  const completedModules = enrollSnap.exists ? enrollSnap.data().completedModules || [] : [];
+
+  if (modules.length === 0 || completedModules.length < modules.length) {
+    throw { status: 403, message: 'El curso aún no está completado' };
+  }
+
+  const userSnap = await db.collection('users').doc(targetUid).get();
+  const userData = userSnap.exists ? userSnap.data() : {};
+  const studentName = userData.displayName || userData.email || targetUid;
+
+  renderCertificate(res, { studentName, courseTitle: course.title, courseId: course.id });
+}));
+
+module.exports = router;

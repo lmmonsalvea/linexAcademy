@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// All reads/writes go through backend/ (Cloud Run), which uses the Admin SDK
+// and therefore bypasses these rules entirely. No client ever talks to
+// Firestore directly, so the correct default here is deny-all — this is not
+// a placeholder to fill in later, it's the intended final state.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

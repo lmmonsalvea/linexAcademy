@@ -42,20 +42,47 @@ Fecha: 2026-08-16
 - Autenticación inicial por correo con verificación; en futuro SSO/SSO2 configurable.
 - Logs de cambios en permisos y documentos disponibles para Superadmin y RRHH según política.
 
-## Estado de implementación (MVP)
+## Estado de implementación
 
-El rol vive en `auth_service` (campo `role` del usuario, incluido en el JWT) con estos valores: `empleado` (por defecto), `instructor`, `admin_area`, `admin_rrhh`, `knowledge_manager`, `superadmin`. Cada microservicio valida el JWT y el rol de forma independiente (no hay un servicio de autorización centralizado todavía):
+La identidad ya no es un JWT propio: el login es **Microsoft/Entra ID SSO real** vía
+Firebase Auth (proveedor nativo `microsoft.com`, ya configurado en el proyecto
+compartido `linexrewards-app` — ver `docs/org-context.md` y
+`.claude/skills/connect-entra-id-firebase-auth/`). Un login exitoso solo prueba
+identidad; la autorización (rol dentro de linexAcademy) es responsabilidad de
+este backend, no de Firebase/Entra ID.
 
-- `courses_service`: crear cursos/módulos requiere `instructor`, `admin_area` o `superadmin`. Inscripción, progreso y certificado usan la identidad del token (no se puede actuar en nombre de otro usuario); ver el progreso de otra persona requiere `instructor`, `admin_area`, `admin_rrhh` o `superadmin`.
-- `knowledge_center`: publicar áreas/documentos y nuevas versiones requiere `admin_area`, `knowledge_manager` o `superadmin`. Las lecturas (catálogo, búsqueda) siguen abiertas.
-- `exams_service`: crear preguntas/plantillas y exportar resultados requiere `admin_rrhh` o `superadmin`. Enviar respuestas y ver el propio resultado usan la identidad del token; ver el resultado de otro requiere `admin_rrhh` o `superadmin`.
+El rol vive en Firestore (`users/{uid}.role`, base nombrada `linex-academy`)
+con estos valores: `empleado` (por defecto), `instructor`, `admin_area`,
+`admin_rrhh`, `knowledge_manager`, `superadmin`. En el primer login, el
+backend (`backend/src/middleware/auth.js`) verifica el token de Firebase,
+comprueba que el dominio del correo esté en la lista permitida
+(`ultragroupla.com`, `linextravel.com`, `linex-loyalty.com`) y crea el
+documento del usuario con rol `empleado` — de ahí en adelante cada request
+vuelve a leer ese documento, no hay nada que decodificar del lado del cliente.
 
-No existe aún un panel de administración para asignar/cambiar roles — por ahora se eligen al registrarse (pantalla de Registro), lo cual es aceptable solo para desarrollo/pruebas.
+Un único backend consolidado (`backend/`, antes 4 microservicios separados)
+aplica los mismos permisos que antes:
 
-## Pendientes (registrados, no implementados aún)
-- Ocultar la navegación (Cursos/Centro de conocimiento/Evaluaciones) cuando no hay sesión iniciada, mostrando solo una portada con descripción de la plataforma; mostrar las secciones una vez autenticado.
-- Panel de administración para asignar y cambiar roles (hoy se elige libremente al registrarse).
-- Restringir también las lecturas (catálogo, documentos) a usuarios autenticados, si se decide que ni siquiera la portada pública debe exponer contenido.
+- Cursos: crear cursos/módulos requiere `instructor`, `admin_area` o `superadmin`. Inscripción, progreso y certificado usan la identidad del token; ver el progreso de otra persona requiere `instructor`, `admin_area`, `admin_rrhh` o `superadmin`.
+- Centro de conocimiento: publicar áreas/documentos y nuevas versiones requiere `admin_area`, `knowledge_manager` o `superadmin`. Las lecturas ahora requieren sesión iniciada (ver "Pendientes resueltos" abajo).
+- Evaluaciones: crear/listar preguntas y plantillas, y exportar resultados, requiere `admin_rrhh` o `superadmin` (antes el banco de preguntas con las respuestas correctas era legible por cualquier usuario autenticado — corregido). Enviar respuestas y ver el propio resultado usan la identidad del token; ver el resultado de otro requiere `admin_rrhh` o `superadmin`.
+
+Panel de administración de roles: `/admin` (solo `superadmin`), respaldado por
+`GET/PATCH /api/users`. El primer superadmin se asigna fuera de la app, ver
+`backend/scripts/bootstrap-superadmin.js` — es un problema de arranque
+inevitable (nadie puede asignarse el primer rol de administrador dentro de un
+sistema donde solo un administrador puede asignar roles).
+
+## Pendientes resueltos en esta iteración
+
+- Navegación oculta sin sesión iniciada — `/` muestra la portada pública (`Landing`) hasta iniciar sesión, y todas las rutas de la app están protegidas por `ProtectedRoute`.
+- Panel de administración para asignar/cambiar roles (`/admin`).
+- Las lecturas del centro de conocimiento y de las evaluaciones ahora requieren sesión iniciada (antes eran públicas sin autenticación).
+
+## Pendientes (todavía no implementados)
+
+- Delegación de permisos por área más granular (hoy `admin_area` es un rol global, no está atado a un área específica en los datos).
+- Auditoría persistente de cambios de rol y de permisos de documentos más allá del campo `roleUpdatedBy`/`roleUpdatedAt`.
 
 ---
 

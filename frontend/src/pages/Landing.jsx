@@ -20,8 +20,7 @@ export default function Landing(){
         <div className="hero-nav">
           <Logo size="lg" />
           <div className="actions">
-            <Link to="/login" className="btn btn-ghost">Iniciar sesión</Link>
-            <Link to="/register" className="btn btn-primary">Crear cuenta</Link>
+            <Link to="/login" className="btn btn-primary">Iniciar sesión</Link>
           </div>
         </div>
 
@@ -31,8 +30,7 @@ export default function Landing(){
             <h1>Todo lo que necesitas para <em>crecer aquí</em>, en un solo lugar.</h1>
             <p>Cursos, evaluaciones y el centro de conocimiento de la compañía, reunidos en una sola plataforma pensada para nuestro equipo — sin buscar en diez carpetas distintas.</p>
             <div className="hero-cta">
-              <Link to="/register" className="btn btn-primary">Entrar a la plataforma →</Link>
-              <Link to="/login" className="btn-text">Ya tengo una cuenta</Link>
+              <Link to="/login" className="btn btn-primary">Entrar a la plataforma →</Link>
             </div>
             <div className="hero-stats">
               <div><b className="mono">32</b><span>cursos activos</span></div>

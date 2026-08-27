@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
-import { getCurrentUser, authHeader } from '../utils/auth'
+import { useAuth } from '../utils/auth'
+import { apiFetch } from '../utils/api'
 
-const API = 'http://localhost:4000'
 const TYPE_LABEL = { mcq: 'Opción múltiple', tf: 'Verdadero / Falso', open: 'Respuesta abierta' }
 
 export default function Exams(){
-  const user = getCurrentUser()
-  const [templates, setTemplates] = useState([])
+  const { profile, loading: authLoading } = useAuth()
+  const [templates, setTemplates] = useState(null)
   const [test, setTest] = useState(null)
   const [qIndex, setQIndex] = useState(0)
   const [answers, setAnswers] = useState({})
@@ -16,19 +16,23 @@ export default function Exams(){
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    fetch(`${API}/templates`).then(r => r.json()).then(setTemplates).catch(() => {})
-  }, [])
+    // Any authenticated user can take a test, but only RRHH/superadmin can
+    // browse the raw template list — a plain employee starting an
+    // evaluation gets the templateId handed to them (course/process flow),
+    // so we only try to preload the picker for roles allowed to see it.
+    if (!profile) return
+    if (!['admin_rrhh', 'superadmin'].includes(profile.role)) { setTemplates([]); return }
+    apiFetch('/api/exams/templates').then((r) => setTemplates(r.templates)).catch((err) => setMsg(err.message))
+  }, [profile])
 
   const startTest = async (templateId) => {
     setMsg(''); setResult(null); setAnswers({}); setQIndex(0)
-    const res = await fetch(`${API}/tests`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...authHeader() },
-      body: JSON.stringify({ templateId })
-    })
-    const j = await res.json()
-    if (res.ok) setTest(j)
-    else setMsg(j.error || 'No se pudo iniciar la evaluación')
+    try {
+      const j = await apiFetch('/api/exams/tests', { method: 'POST', body: JSON.stringify({ templateId }) })
+      setTest(j)
+    } catch (err) {
+      setMsg(err.message || 'No se pudo iniciar la evaluación')
+    }
   }
 
   const setAnswer = (questionId, value) => setAnswers({ ...answers, [questionId]: value })
@@ -41,17 +45,16 @@ export default function Exams(){
         textAnswer: typeof answers[q.id] === 'string' ? answers[q.id] : undefined
       }))
     }
-    const res = await fetch(`${API}/tests/${test.testId}/submit`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...authHeader() },
-      body: JSON.stringify(payload)
-    })
-    const j = await res.json()
-    if (res.ok) setResult(j)
-    else setMsg(j.error || 'No se pudo enviar la evaluación')
+    try {
+      const j = await apiFetch(`/api/exams/tests/${test.id}/submit`, { method: 'POST', body: JSON.stringify(payload) })
+      setResult(j)
+    } catch (err) {
+      setMsg(err.message || 'No se pudo enviar la evaluación')
+    }
   }
 
-  if (!user) return <Navigate to="/login" replace />
+  if (authLoading) return <AppShell active="exams"><div className="page-loading">Cargando…</div></AppShell>
+  if (!profile) return <Navigate to="/login" replace />
 
   if (result) {
     return (
@@ -121,14 +124,15 @@ export default function Exams(){
         </div>
       </div>
       <div style={{ marginTop: 18 }}>
-        {templates.map(t => (
-          <div key={t._id} className="card exam-row">
+        {templates === null && <p style={{ color: 'var(--text-dim)' }}>Cargando…</p>}
+        {templates && templates.map(t => (
+          <div key={t.id} className="card exam-row">
             <div className="exam-ic" style={{ background: 'var(--warning-bg)', color: 'var(--warning)' }}>📝</div>
-            <div className="txt"><b>{t.name}</b><span>{(t.sections || []).reduce((n, s) => n + (s.questionIds || []).length, 0)} preguntas</span></div>
-            <button className="btn btn-primary btn-sm" onClick={() => startTest(t._id)}>Comenzar</button>
+            <div className="txt"><b>{t.title}</b><span>{(t.sections || []).reduce((n, s) => n + (s.questionIds || []).length, 0)} preguntas</span></div>
+            <button className="btn btn-primary btn-sm" onClick={() => startTest(t.id)}>Comenzar</button>
           </div>
         ))}
-        {templates.length === 0 && <p style={{ color: 'var(--text-dim)' }}>Aún no hay evaluaciones publicadas.</p>}
+        {templates && templates.length === 0 && <p style={{ color: 'var(--text-dim)' }}>Aún no hay evaluaciones publicadas.</p>}
       </div>
       {msg && <p className="auth-msg">{msg}</p>}
     </AppShell>

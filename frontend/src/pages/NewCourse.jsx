@@ -1,19 +1,18 @@
 import React, { useState } from 'react'
-import { useNavigate, Navigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
-import { getCurrentUser, authHeader } from '../utils/auth'
+import { apiFetch } from '../utils/api'
 
-const emptyModule = () => ({ type: 'video', title: '', url: '', quizTemplateId: '' })
-const allowedRoles = ['instructor', 'admin_area', 'superadmin']
+const emptyModule = () => ({ type: 'video', title: '', url: '' })
 
 export default function NewCourse(){
   const navigate = useNavigate()
-  const user = getCurrentUser()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [area, setArea] = useState('')
   const [modules, setModules] = useState([emptyModule()])
   const [msg, setMsg] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const updateModule = (i, field, value) => {
     setModules(modules.map((m, idx) => idx === i ? { ...m, [field]: value } : m))
@@ -21,29 +20,25 @@ export default function NewCourse(){
 
   const submit = async e => {
     e.preventDefault()
+    setMsg('')
+    setSubmitting(true)
     const payload = {
       title,
       description,
       area: area || null,
-      modules: modules.filter(m => m.title && (m.url || m.type === 'quiz'))
+      modules: modules.filter(m => m.title.trim())
     }
-    const res = await fetch('http://localhost:7000/courses', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...authHeader() },
-      body: JSON.stringify(payload)
-    })
-    const j = await res.json()
-    if (res.ok) navigate(`/courses/${j.id}`)
-    else setMsg(j.error || 'Error al crear el curso')
-  }
-
-  if (!user) return <Navigate to="/login" replace />
-  if (!allowedRoles.includes(user.role)) {
-    return (
-      <AppShell active="courses">
-        <p>Tu rol ({user.role}) no tiene permiso para crear cursos. Se requiere Instructor, Admin Área o Superadmin.</p>
-      </AppShell>
-    )
+    try {
+      const { id } = await apiFetch('/api/courses', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      })
+      navigate(`/courses/${id}`)
+    } catch (err) {
+      setMsg(err.message || 'Error al crear el curso')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -72,14 +67,11 @@ export default function NewCourse(){
             {m.type !== 'quiz' && (
               <div className="field"><label>URL</label><input value={m.url} onChange={e => updateModule(i, 'url', e.target.value)} placeholder="https://..." /></div>
             )}
-            {m.type === 'quiz' && (
-              <div className="field"><label>ID de plantilla de evaluación</label><input value={m.quizTemplateId} onChange={e => updateModule(i, 'quizTemplateId', e.target.value)} /></div>
-            )}
           </div>
         ))}
         <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setModules([...modules, emptyModule()])}>+ Agregar módulo</button>
-          <button type="submit" className="btn btn-primary">Crear curso</button>
+          <button type="submit" className="btn btn-primary" disabled={submitting}>{submitting ? 'Creando…' : 'Crear curso'}</button>
         </div>
       </form>
       {msg && <p className="auth-msg">{msg}</p>}

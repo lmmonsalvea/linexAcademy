@@ -10,3 +10,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 coverage/
+.firebase/
+firebase-debug.log
+firestore-debug.log
