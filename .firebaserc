@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "linexrewards-app"
-  }
+  },
+  "targets": {
+    "linexrewards-app": {
+      "hosting": {
+        "linexacademy": [
+          "linexacademy"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
