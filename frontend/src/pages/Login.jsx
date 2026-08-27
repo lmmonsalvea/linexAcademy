@@ -44,15 +44,7 @@ export default function Login() {
 
         <button
           className="btn btn-primary btn-block"
-          onClick={() => handleSignIn('Microsoft', signInWithMicrosoft)}
-          disabled={loadingProvider !== null}
-        >
-          {loadingProvider === 'Microsoft' ? 'Conectando…' : 'Iniciar sesión con Microsoft'}
-        </button>
-
-        <button
-          className="btn btn-ghost btn-block"
-          style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}
           onClick={() => handleSignIn('Google', signInWithGoogle)}
           disabled={loadingProvider !== null}
         >
@@ -63,6 +55,22 @@ export default function Login() {
             <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
           </svg>
           {loadingProvider === 'Google' ? 'Conectando…' : 'Iniciar sesión con Google'}
+        </button>
+
+        <button
+          className="btn btn-ghost btn-block"
+          style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}
+          onClick={() => handleSignIn('Outlook', signInWithMicrosoft)}
+          disabled={loadingProvider !== null}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#0364B8" d="M13 3h8v8h-8z" />
+            <path fill="#0078D4" d="M13 3 3 5v6h10z" />
+            <path fill="#28A8EA" d="M13 11h8v8h-8z" />
+            <path fill="#0078D4" d="M3 11h10v6H3z" />
+            <path fill="#fff" d="M8 8.2a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6zm0 5.3a2 2 0 1 1 0-4 2 2 0 0 1 0 4z" />
+          </svg>
+          {loadingProvider === 'Outlook' ? 'Conectando…' : 'Iniciar sesión con Outlook'}
         </button>
 
         {error && <p className="auth-msg">{error}</p>}
