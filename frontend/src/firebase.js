@@ -4,11 +4,18 @@ import { getAuth, OAuthProvider } from 'firebase/auth'
 // linexAcademy lives in the shared `linexrewards-app` Firebase project (see
 // docs/org-context.md) — this config is not secret, it's the standard
 // public web config Firebase issues per app.
+// Firebase web "API keys" are not secrets (they only select which project's
+// config loads — real access control is Firebase Auth + Firestore rules) and
+// are shared by every web app registered in the same project. This is the
+// project's browser key; the `linexrewards-app` project has hit its Firebase
+// web-app-registration quota, so linexAcademy reuses the shared key/appId
+// instead of getting its own "app" entry — that's a cosmetic grouping in the
+// Firebase console (mostly for Analytics), not a security boundary.
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyBICqc49j3O1jlBmnEZT-0Ux2PZNbaJV2c',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'linexrewards-app.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'linexrewards-app',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:145860740642:web:6a09a7123909735e80ec7b',
 }
 
 export const firebaseApp = initializeApp(firebaseConfig)
