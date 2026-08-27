@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app'
-import { getAuth, OAuthProvider } from 'firebase/auth'
+import { getAuth, GoogleAuthProvider, OAuthProvider } from 'firebase/auth'
 
 // linexAcademy lives in the shared `linexrewards-app` Firebase project (see
 // docs/org-context.md) — this config is not secret, it's the standard
@@ -34,3 +34,12 @@ microsoftProvider.setCustomParameters({
   prompt: 'select_account',
 })
 microsoftProvider.addScope('email')
+
+// Google is also already enabled as a native provider in linexrewards-app
+// (confirmed alongside Microsoft — same project, no separate setup needed).
+// Matches the pattern used by other Linex apps on this project (athena,
+// marlo): offer both, no client-side domain restriction on the Google
+// provider itself — the backend's email-domain allowlist
+// (backend/src/middleware/auth.js) is what actually gates access, the same
+// way regardless of which provider was used to sign in.
+export const googleProvider = new GoogleAuthProvider()

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth'
-import { auth, microsoftProvider } from '../firebase'
+import { auth, googleProvider, microsoftProvider } from '../firebase'
 import { apiFetch } from './api'
 
 // `firebaseUser` = raw Firebase identity (proves who you are).
@@ -15,6 +15,7 @@ const AuthContext = createContext({
   loading: true,
   error: null,
   signInWithMicrosoft: async () => {},
+  signInWithGoogle: async () => {},
   signOut: async () => {},
   refreshProfile: async () => {},
 })
@@ -51,11 +52,12 @@ export function AuthProvider({ children }) {
   }, [])
 
   const signInWithMicrosoft = () => signInWithPopup(auth, microsoftProvider)
+  const signInWithGoogle = () => signInWithPopup(auth, googleProvider)
   const signOut = () => firebaseSignOut(auth)
 
   return (
     <AuthContext.Provider
-      value={{ firebaseUser, profile, loading, error, signInWithMicrosoft, signOut, refreshProfile: loadProfile }}
+      value={{ firebaseUser, profile, loading, error, signInWithMicrosoft, signInWithGoogle, signOut, refreshProfile: loadProfile }}
     >
       {children}
     </AuthContext.Provider>
