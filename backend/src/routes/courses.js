@@ -7,6 +7,7 @@ const { validate } = require('../lib/validate');
 const { asyncRoute } = require('../middleware/errorHandler');
 const { renderCertificate } = require('../lib/certificate');
 const { notifyCourseUpdate } = require('../lib/courseNotifications');
+const { syncEnrollmentsForCourse } = require('../lib/enrollmentSync');
 
 const router = express.Router();
 
@@ -16,18 +17,23 @@ const canManageCourses = requireRole('instructor', 'admin_area', 'superadmin');
 // Who may view someone else's progress/certificate — ported from
 // courses_service/index.js `canViewOtherProgress`.
 const canViewOthersProgress = (role) =>
-  ['instructor', 'admin_area', 'admin_rrhh', 'superadmin'].includes(role);
+  ['instructor', 'admin_area', 'superadmin'].includes(role);
 
 // Roles that manage/oversee the catalog and therefore see every course
 // regardless of business-unit/block assignment.
 const seesEverything = (role) =>
-  ['instructor', 'admin_area', 'admin_rrhh', 'knowledge_manager', 'superadmin'].includes(role);
+  ['instructor', 'admin_area', 'superadmin'].includes(role);
 
 const moduleInputSchema = z.object({
   id: z.string().optional(),
   type: z.enum(MODULE_TYPES),
   title: z.string().trim().min(1, 'El título del módulo es obligatorio'),
   url: z.string().trim().optional().nullable(),
+  // A hidden module stays in the course (editable, re-showable) but is
+  // dropped from the modules array served to anyone who isn't managing the
+  // catalog, and excluded from progress/certificate requirements for
+  // everyone — see activeModules()/visibleModulesFor() below.
+  hidden: z.boolean().optional(),
 });
 
 const createCourseSchema = z.object({
@@ -64,8 +70,23 @@ function buildModule(input, order) {
     type: input.type,
     title: input.title,
     url: input.url || null,
+    hidden: !!input.hidden,
     order,
   };
+}
+
+// Hidden modules never count toward progress/certificate requirements, for
+// anyone — "hidden" means "not currently part of the course", not "hidden
+// but still mandatory".
+function activeModules(course) {
+  return (course.modules || []).filter((m) => !m.hidden);
+}
+
+// What a given role is allowed to see in the modules array itself: managing
+// roles get everything (incl. hidden, so they can toggle it back), everyone
+// else only ever sees the active ones.
+function visibleModulesFor(course, role) {
+  return seesEverything(role) ? (course.modules || []) : activeModules(course);
 }
 
 function computeProgress(modules, completedModules) {
@@ -97,13 +118,13 @@ async function getCourseOr404(id) {
   return { id: snap.id, ...snap.data() };
 }
 
-function courseSummary(course) {
+function courseSummary(course, role) {
   return {
     id: course.id,
     title: course.title,
     description: course.description || '',
     area: course.area || null,
-    modules: course.modules || [],
+    modules: visibleModulesFor(course, role),
     assignedAreaIds: course.assignedAreaIds || [],
     assignedBlocks: course.assignedBlocks || [],
     updatedAt: course.updatedAt || null,
@@ -130,6 +151,11 @@ router.post('/', canManageCourses, asyncRoute(async (req, res) => {
   };
   const ref = await db.collection('courses').add(course);
   res.json({ id: ref.id });
+
+  // Fire-and-forget: a brand-new course with no assignment is open to
+  // everyone (the transversal case), so this is what actually hands it out
+  // as a work path on creation, not just on later edits.
+  syncEnrollmentsForCourse({ id: ref.id, ...course }).catch((err) => console.error('syncEnrollmentsForCourse failed:', err));
 }));
 
 // 2. Catalog / "my courses" — the frontend Dashboard already depends on the
@@ -144,8 +170,8 @@ router.get('/', asyncRoute(async (req, res) => {
       const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
       if (!enrollSnap.exists) continue;
       results.push({
-        ...courseSummary(course),
-        progress: computeProgress(course.modules, enrollSnap.data().completedModules),
+        ...courseSummary(course, req.user.role),
+        progress: computeProgress(activeModules(course), enrollSnap.data().completedModules),
       });
     }
     return res.json({ courses: results });
@@ -159,7 +185,7 @@ router.get('/', asyncRoute(async (req, res) => {
   const results = [];
   for (const course of filtered) {
     const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
-    results.push({ ...courseSummary(course), enrolled: enrollSnap.exists });
+    results.push({ ...courseSummary(course, req.user.role), enrolled: enrollSnap.exists });
   }
   res.json({ courses: results });
 }));
@@ -174,14 +200,15 @@ router.get('/:id', asyncRoute(async (req, res) => {
   }
   const completedModules = enrolled ? enrollSnap.data().completedModules || [] : [];
   res.json({
-    ...courseSummary(course),
+    ...courseSummary(course, req.user.role),
     instructorUid: course.instructorUid || null,
     instructorEmail: course.instructorEmail || null,
-    // Not in the original spec's response shape, but CourseDetail.jsx needs
-    // it to decide whether to show "Inscribirme" vs the progress UI — percent
-    // alone can't distinguish "enrolled, 0% done" from "not enrolled".
+    // `enrolled` used to gate a self-serve "Inscribirme" button; enrollment
+    // is now assigned automatically (see enrollmentSync.js), but the field
+    // stays since CourseDetail.jsx still uses it to tell "assigned to me,
+    // 0% done" apart from "not assigned to me at all".
     enrolled,
-    progress: computeProgress(course.modules, completedModules),
+    progress: computeProgress(activeModules(course), completedModules),
   });
 }));
 
@@ -211,11 +238,14 @@ router.patch('/:id', canManageCourses, asyncRoute(async (req, res) => {
 
   await courseRef(course.id).update(patch);
   const updated = await getCourseOr404(course.id);
-  res.json(courseSummary(updated));
+  res.json(courseSummary(updated, req.user.role));
 
   if (isAnnouncement) {
     notifyCourseUpdate(updated).catch((err) => console.error('notifyCourseUpdate failed:', err));
   }
+  // The assignment may have changed — hand the course out to anyone newly
+  // in scope. Cheap/idempotent enough to just always run on edit.
+  syncEnrollmentsForCourse(updated).catch((err) => console.error('syncEnrollmentsForCourse failed:', err));
 }));
 
 // 5. Append a module to an existing course.
@@ -270,7 +300,8 @@ router.post('/:id/progress', asyncRoute(async (req, res) => {
       };
 
   const completedModules = [...new Set([...(existing.completedModules || []), moduleId])];
-  const isComplete = modules.length > 0 && completedModules.length === modules.length;
+  const active = activeModules(course);
+  const isComplete = active.length > 0 && active.every((m) => completedModules.includes(m.id));
 
   await ref.set({
     ...existing,
@@ -278,7 +309,7 @@ router.post('/:id/progress', asyncRoute(async (req, res) => {
     completedAt: isComplete ? existing.completedAt || new Date().toISOString() : null,
   });
 
-  res.json(computeProgress(modules, completedModules));
+  res.json(computeProgress(active, completedModules));
 }));
 
 // 8. View a specific user's progress.
@@ -290,7 +321,7 @@ router.get('/:id/progress/:uid', asyncRoute(async (req, res) => {
   const course = await getCourseOr404(req.params.id);
   const enrollSnap = await enrollmentRef(course.id, targetUid).get();
   const completedModules = enrollSnap.exists ? enrollSnap.data().completedModules || [] : [];
-  res.json(computeProgress(course.modules, completedModules));
+  res.json(computeProgress(activeModules(course), completedModules));
 }));
 
 // 9. Certificate — only once fully completed.
@@ -300,11 +331,11 @@ router.get('/:id/certificate', asyncRoute(async (req, res) => {
     throw { status: 403, message: 'No tienes permisos para ver este certificado' };
   }
   const course = await getCourseOr404(req.params.id);
-  const modules = course.modules || [];
+  const modules = activeModules(course);
   const enrollSnap = await enrollmentRef(course.id, targetUid).get();
   const completedModules = enrollSnap.exists ? enrollSnap.data().completedModules || [] : [];
 
-  if (modules.length === 0 || completedModules.length < modules.length) {
+  if (modules.length === 0 || !modules.every((m) => completedModules.includes(m.id))) {
     throw { status: 403, message: 'El curso aún no está completado' };
   }
 

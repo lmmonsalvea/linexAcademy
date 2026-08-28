@@ -16,12 +16,12 @@ export default function Exams(){
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    // Any authenticated user can take a test, but only RRHH/superadmin can
-    // browse the raw template list — a plain employee starting an
+    // Any authenticated user can take a test, but only instructor/superadmin
+    // can browse the raw template list — a plain employee starting an
     // evaluation gets the templateId handed to them (course/process flow),
     // so we only try to preload the picker for roles allowed to see it.
     if (!profile) return
-    if (!['admin_rrhh', 'superadmin'].includes(profile.role)) { setTemplates([]); return }
+    if (!['instructor', 'superadmin'].includes(profile.role)) { setTemplates([]); return }
     apiFetch('/api/exams/templates').then((r) => setTemplates(r.templates)).catch((err) => setMsg(err.message))
   }, [profile])
 

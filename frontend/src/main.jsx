@@ -10,7 +10,6 @@ import Login from './pages/Login'
 import Courses from './pages/Courses'
 import NewCourse from './pages/NewCourse'
 import CourseDetail from './pages/CourseDetail'
-import RRHHPanel from './pages/RRHHPanel'
 import Admin from './pages/Admin'
 import './styles.css'
 
@@ -29,10 +28,8 @@ function App() {
           <Route path="/courses/:id" element={<ProtectedRoute><CourseDetail /></ProtectedRoute>} />
           <Route path="/knowledge" element={<ProtectedRoute><Knowledge /></ProtectedRoute>} />
           <Route path="/exams" element={<ProtectedRoute><Exams /></ProtectedRoute>} />
-          <Route
-            path="/rrhh"
-            element={<ProtectedRoute roles={['admin_rrhh', 'superadmin']}><RRHHPanel /></ProtectedRoute>}
-          />
+          {/* /rrhh (RRHHPanel) intentionally hidden for this scope — component
+              kept at src/pages/RRHHPanel.jsx, just not routed/linked. */}
           <Route
             path="/admin"
             element={<ProtectedRoute roles={['superadmin']}><Admin /></ProtectedRoute>}

@@ -1,6 +1,7 @@
 const { db, auth } = require('../firebaseAdmin');
+const { syncEnrollmentsForUser } = require('../lib/enrollmentSync');
 
-const ROLES = ['empleado', 'instructor', 'admin_area', 'admin_rrhh', 'knowledge_manager', 'superadmin'];
+const ROLES = ['empleado', 'instructor', 'admin_area', 'superadmin'];
 
 const ALLOWED_DOMAINS = (process.env.ALLOWED_EMAIL_DOMAINS || 'ultragroupla.com,linextravel.com,linex-loyalty.com')
   .split(',')
@@ -39,9 +40,15 @@ async function verifyToken(req, res, next) {
     const decoded = await auth.verifyIdToken(match[1]);
     const email = decoded.email;
 
-    if (!email || !decoded.email_verified) {
-      return next({ status: 403, message: 'La cuenta de Microsoft debe tener un correo verificado' });
+    if (!email) {
+      return next({ status: 403, message: 'No se pudo obtener el correo de tu cuenta' });
     }
+    // NOT requiring decoded.email_verified: Google always sets it, but
+    // Microsoft/Entra ID work accounts frequently come back with it unset
+    // even for a real, valid organizational account — requiring it here
+    // silently rejected every Microsoft sign-in (the popup would succeed,
+    // then this endpoint 403'd, and the frontend just looked like login
+    // "did nothing"). The domain allowlist below is the real gate.
 
     const userRef = db.collection('users').doc(decoded.uid);
     const snap = await userRef.get();
@@ -60,6 +67,11 @@ async function verifyToken(req, res, next) {
         createdAt: new Date().toISOString(),
       };
       await userRef.set(userData);
+      // No areaId/block yet, so this only picks up open/transversal
+      // courses — exactly the "day-one" set a brand-new employee should
+      // already have (see enrollmentSync.js). Failure here shouldn't block
+      // the person from signing in.
+      await syncEnrollmentsForUser({ uid: decoded.uid, ...userData }).catch((err) => console.error('syncEnrollmentsForUser (new user) failed:', err));
     }
 
     if (userData.disabled) {

@@ -1,88 +1,94 @@
 # Matriz de Roles y Permisos — Plataforma eLearning
 
-Versión: 0.1
-Fecha: 2026-08-16
+Versión: 0.3
+Fecha: 2026-08-28
 
-## Roles principales
-- `Superadmin` (TI): control total, despliegue, backups, gestión de integraciones.
-- `Admin RRHH`: crea evaluaciones, accede a resultados de procesos de ingreso/ascenso, genera reportes RRHH.
-- `Admin Área`: responsable por el contenido y permisos de su área; publica documentos en el centro de conocimiento; asigna instructores.
-- `Instructor`: crea cursos, añade recursos (vídeo, SCORM, PDF), crea quizzes y califica actividades.
-- `Knowledge Manager`: gestiona el centro de conocimiento, estructura áreas, controla versiones y metadatos.
-- `Empleado`: rol base de cualquier persona registrada. Puede consultar el centro de conocimiento, ver el catálogo de cursos, inscribirse, completar módulos/evaluaciones y descargar sus certificados. Buscar documentación no requiere estar inscrito en ningún curso — "Alumno" no es un rol aparte, es simplemente un Empleado que además está tomando cursos.
+## Roles (reducidos a los que realmente se usan en este alcance)
+
+- **Superadmin**: control total, sin restricciones. Gestiona usuarios (roles, inactivar/eliminar, asignación de unidad/bloque), y puede crear/editar cualquier curso o contenido del centro de conocimiento.
+- **Admin Área**: crea/edita cursos y publica documentos, áreas, bloques y equipos del centro de conocimiento.
+- **Instructor**: crea/edita cursos **y** gestiona evaluaciones (banco de preguntas, plantillas, resultados agregados, exportes).
+- **Empleado**: rol base de cualquier persona registrada. Ve su catálogo de cursos (los que le corresponden), avanza módulos, presenta evaluaciones y descarga certificados. No existe un rol "Alumno" separado.
+
+Se eliminaron `Admin RRHH` y `Knowledge Manager` de este alcance (sin usuarios asignados a ellos al momento de quitarlos). Sus permisos se repartieron así:
+- Gestión de evaluaciones (antes exclusiva de Admin RRHH) → ahora la tiene **Instructor** también, junto con Superadmin.
+- Gestión de contenido del centro de conocimiento (antes también de Knowledge Manager) → la sigue teniendo **Admin Área**, junto con Superadmin.
+
+El panel RRHH (`/rrhh`) está oculto por ahora (componente conservado en `frontend/src/pages/RRHHPanel.jsx`, sin ruta ni enlace en el menú) — no forma parte de este primer alcance.
 
 ## Permisos (resumen)
 
-- Gestionar usuarios: Superadmin
-- Gestionar roles: Superadmin
-- Crear/editar cursos: Instructor, Admin Área (según política)
-- Publicar documentos (centro de conocimiento): Admin Área, Knowledge Manager
-- Asignar permisos de documentos: Admin Área, Knowledge Manager
-- Crear evaluaciones RRHH: Admin RRHH
-- Ver resultados de evaluaciones: Admin RRHH, Superadmin, el usuario evaluado
-- Programar webinars: Instructor, Admin Área
-- Gestionar integraciones (Teams, LRS): Superadmin
+- Gestionar usuarios / roles / inactivar / eliminar: Superadmin
+- Crear/editar cursos, asignarlos a unidad de negocio y bloque, ocultar módulos: Instructor, Admin Área, Superadmin
+- Crear/editar evaluaciones (banco de preguntas, plantillas), ver resultados agregados: Instructor, Superadmin
+- Publicar/renombrar áreas, bloques y equipos del centro de conocimiento: Admin Área, Superadmin
+- Ver el progreso/certificado de otra persona: Instructor, Admin Área, Superadmin
 
-## Regla de delegación por área
-- Cada área tiene un `Admin Área` que puede:
-  - Crear/editar documentos de su área.
-  - Asignar instructores y revisar contenidos propuestos.
-  - Conceder permisos de lectura/escritura a usuarios de su área.
+## Identidad y autorización
 
-## Flujo de aprobación de documentos
-1. Instructor o colaborador sube documento a borradores del área.
-2. Admin Área revisa y aprueba para publicar en el centro de conocimiento.
-3. Knowledge Manager puede cambiar metadatos y publicar globalmente si aplica.
-
-## Notas sobre RRHH y evaluaciones
-- Las evaluaciones vinculadas a ingresos y ascensos deben quedar registradas con auditoría (fecha, evaluador, puntuaciones, observaciones).
-- RRHH podrá crear plantillas de evaluación (habilidades blandas/duras) y asignarlas a procesos.
-
-## Accesos y seguridad
-- Autenticación inicial por correo con verificación; en futuro SSO/SSO2 configurable.
-- Logs de cambios en permisos y documentos disponibles para Superadmin y RRHH según política.
-
-## Estado de implementación
-
-La identidad ya no es un JWT propio: el login es **Microsoft/Entra ID SSO real** vía
-Firebase Auth (proveedor nativo `microsoft.com`, ya configurado en el proyecto
-compartido `linexrewards-app` — ver `docs/org-context.md` y
+La identidad es **Microsoft/Entra ID SSO real** (y también Google, ver más abajo) vía
+Firebase Auth — proveedores nativos `microsoft.com` y `google.com`, ya configurados en el
+proyecto compartido `linexrewards-app` (ver `docs/org-context.md` y
 `.claude/skills/connect-entra-id-firebase-auth/`). Un login exitoso solo prueba
 identidad; la autorización (rol dentro de linexAcademy) es responsabilidad de
 este backend, no de Firebase/Entra ID.
 
+**Nota de una corrección real:** el login con Microsoft dejó de funcionar en un
+momento porque el backend exigía `email_verified` en el token — Google
+siempre lo marca, pero las cuentas de trabajo/escuela de Microsoft/Entra ID
+frecuentemente no lo marcan aunque la cuenta sea legítima. Se quitó esa
+exigencia (`backend/src/middleware/auth.js`); el filtro real de acceso es la
+lista de dominios permitidos, no ese campo.
+
 El rol vive en Firestore (`users/{uid}.role`, base nombrada `linex-academy`)
 con estos valores: `empleado` (por defecto), `instructor`, `admin_area`,
-`admin_rrhh`, `knowledge_manager`, `superadmin`. En el primer login, el
-backend (`backend/src/middleware/auth.js`) verifica el token de Firebase,
+`superadmin`. En el primer login, el backend verifica el token de Firebase,
 comprueba que el dominio del correo esté en la lista permitida
 (`ultragroupla.com`, `linextravel.com`, `linex-loyalty.com`) y crea el
-documento del usuario con rol `empleado` — de ahí en adelante cada request
-vuelve a leer ese documento, no hay nada que decodificar del lado del cliente.
-
-Un único backend consolidado (`backend/`, antes 4 microservicios separados)
-aplica los mismos permisos que antes:
-
-- Cursos: crear cursos/módulos requiere `instructor`, `admin_area` o `superadmin`. Inscripción, progreso y certificado usan la identidad del token; ver el progreso de otra persona requiere `instructor`, `admin_area`, `admin_rrhh` o `superadmin`.
-- Centro de conocimiento: publicar áreas/documentos y nuevas versiones requiere `admin_area`, `knowledge_manager` o `superadmin`. Las lecturas ahora requieren sesión iniciada (ver "Pendientes resueltos" abajo).
-- Evaluaciones: crear/listar preguntas y plantillas, y exportar resultados, requiere `admin_rrhh` o `superadmin` (antes el banco de preguntas con las respuestas correctas era legible por cualquier usuario autenticado — corregido). Enviar respuestas y ver el propio resultado usan la identidad del token; ver el resultado de otro requiere `admin_rrhh` o `superadmin`.
+documento del usuario con rol `empleado`.
 
 Panel de administración de roles: `/admin` (solo `superadmin`), respaldado por
-`GET/PATCH /api/users`. El primer superadmin se asigna fuera de la app, ver
-`backend/scripts/bootstrap-superadmin.js` — es un problema de arranque
-inevitable (nadie puede asignarse el primer rol de administrador dentro de un
-sistema donde solo un administrador puede asignar roles).
+`GET/PATCH /api/users`. Desde ahí también se puede **inactivar** (bloquea el
+login, reversible), **eliminar** (borra la cuenta de Firebase Auth y su
+registro, permanente) y asignar la **unidad de negocio / bloque** de cada
+persona (`PATCH /api/users/:uid/assignment`). Ninguna de las dos acciones
+destructivas se puede aplicar a la propia cuenta. El primer superadmin se
+asigna fuera de la app, ver `backend/scripts/bootstrap-superadmin.js`.
 
-## Pendientes resueltos en esta iteración
+## Cursos: asignación por unidad/bloque y matrícula automática
 
-- Navegación oculta sin sesión iniciada — `/` muestra la portada pública (`Landing`) hasta iniciar sesión, y todas las rutas de la app están protegidas por `ProtectedRoute`.
-- Panel de administración para asignar/cambiar roles (`/admin`).
-- Las lecturas del centro de conocimiento y de las evaluaciones ahora requieren sesión iniciada (antes eran públicas sin autenticación).
+Ya no existe la auto-inscripción ("Inscribirme"): a un curso se le asignan
+cero o más unidades de negocio (`assignedAreaIds`) y bloques
+(`assignedBlocks`) al crearlo/editarlo — sin nada seleccionado, queda
+transversal (abierto a toda la compañía). A partir de ahí, `backend/src/lib/enrollmentSync.js`
+matricula automáticamente a quien corresponda, sin que la persona haga nada:
+
+- Al crear o editar un curso: matricula a todas las personas cuya
+  unidad/bloque coincida (o a todas si el curso es transversal).
+- Al cambiar la unidad/bloque de una persona (`/admin`): la matricula en
+  cualquier curso que ahora coincida.
+- Al primer login de alguien nuevo: la matricula en los cursos transversales
+  (sin unidad/bloque asignado aún, pero ya calificando por "abierto a
+  todos").
+
+Los módulos de un curso también se pueden **ocultar** individualmente (quedan
+guardados, pero no los ven los estudiantes ni cuentan para el progreso o el
+certificado) — útil para contenido en construcción sin tener que borrarlo.
+
+## Centro de conocimiento: administración de la estructura
+
+Superadmin y Admin Área pueden, además de publicar equipos (documentos):
+- Renombrar una unidad de negocio (área).
+- Renombrar un bloque (actualiza en bloque todos los equipos que lo usan —
+  un bloque no es una entidad propia en Firestore, es un campo compartido).
+- Renombrar un equipo de trabajo y/o moverlo a otro bloque o unidad de
+  negocio distinto.
 
 ## Pendientes (todavía no implementados)
 
-- Delegación de permisos por área más granular (hoy `admin_area` es un rol global, no está atado a un área específica en los datos).
-- Auditoría persistente de cambios de rol y de permisos de documentos más allá del campo `roleUpdatedBy`/`roleUpdatedAt`.
+- Gestión manual de matrícula (excepciones puntuales fuera de la asignación por unidad/bloque).
+- Auditoría persistente de cambios de rol/estructura más allá de los campos `roleUpdatedBy`/`roleUpdatedAt`.
+- Envío real de correo de "actualización de curso" (el mecanismo ya existe en `backend/src/lib/mailer.js`, pendiente de credenciales SMTP).
 
 ---
 

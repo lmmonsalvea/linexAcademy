@@ -4,6 +4,7 @@ const { db, auth } = require('../firebaseAdmin');
 const { requireRole, ROLES } = require('../middleware/auth');
 const { validate } = require('../lib/validate');
 const { asyncRoute } = require('../middleware/errorHandler');
+const { syncEnrollmentsForUser } = require('../lib/enrollmentSync');
 
 const router = express.Router();
 
@@ -49,13 +50,20 @@ router.patch('/:uid/assignment', requireRole('superadmin'), asyncRoute(async (re
   if (block !== undefined) patch.block = block;
   await ref.update(patch);
   res.json({ uid: req.params.uid, ...patch });
+
+  // Hand out (or newly qualify for) whatever courses now match this
+  // person's unit/block — see enrollmentSync.js.
+  const updatedSnap = await ref.get();
+  syncEnrollmentsForUser({ uid: req.params.uid, ...updatedSnap.data() })
+    .catch((err) => console.error('syncEnrollmentsForUser failed:', err));
 }));
 
 const statusSchema = z.object({ disabled: z.boolean() });
 
-// Inactivar/reactivar: blocks sign-in in Firebase Auth (disabled accounts
-// fail verifyIdToken's checkRevoked check, see middleware/auth.js) without
-// losing their data — unlike delete, this is reversible.
+// Inactivar/reactivar: blocks sign-in in Firebase Auth (the `disabled` check
+// in middleware/auth.js reads Firestore fresh on every request, so this
+// takes effect on the account's very next call) without losing their data —
+// unlike delete, this is reversible.
 router.patch('/:uid/status', requireRole('superadmin'), asyncRoute(async (req, res) => {
   if (req.params.uid === req.user.uid) {
     throw { status: 400, message: 'No puedes inactivar tu propia cuenta' };

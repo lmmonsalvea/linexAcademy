@@ -4,7 +4,7 @@ import { apiFetch } from '../utils/api'
 import { useAuth } from '../utils/auth'
 
 const DOTS = ['#5B5CFF', '#6D28D9', '#E0B3FF', '#17153B', '#B4790F']
-const canPublish = (role) => ['admin_area', 'knowledge_manager', 'superadmin'].includes(role)
+const canPublish = (role) => ['admin_area', 'superadmin'].includes(role)
 
 export default function Knowledge() {
   const { profile, loading: authLoading } = useAuth()
@@ -30,6 +30,17 @@ export default function Knowledge() {
 
   const [showVersionForm, setShowVersionForm] = useState(false)
   const [newVersionContent, setNewVersionContent] = useState('')
+
+  const [renamingAreaId, setRenamingAreaId] = useState(null)
+  const [renameAreaValue, setRenameAreaValue] = useState('')
+
+  const [renamingBlock, setRenamingBlock] = useState(false)
+  const [renameBlockValue, setRenameBlockValue] = useState('')
+
+  const [editingTeam, setEditingTeam] = useState(false)
+  const [teamMetaTitle, setTeamMetaTitle] = useState('')
+  const [teamMetaBlock, setTeamMetaBlock] = useState('')
+  const [teamMetaAreaId, setTeamMetaAreaId] = useState('')
 
   const [saving, setSaving] = useState(false)
 
@@ -135,6 +146,75 @@ export default function Knowledge() {
     }
   }
 
+  const renameArea = async (e) => {
+    e.preventDefault()
+    if (!renamingAreaId || !renameAreaValue.trim()) return
+    setSaving(true)
+    try {
+      await apiFetch(`/api/knowledge/areas/${renamingAreaId}`, { method: 'PATCH', body: JSON.stringify({ name: renameAreaValue.trim() }) })
+      setAreas((prev) => prev.map((a) => (a.id === renamingAreaId ? { ...a, name: renameAreaValue.trim() } : a)).sort((a, b) => a.name.localeCompare(b.name)))
+      if (selectedArea?.id === renamingAreaId) setSelectedArea((prev) => ({ ...prev, name: renameAreaValue.trim() }))
+      setRenamingAreaId(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const renameBlock = async (e) => {
+    e.preventDefault()
+    if (!selectedArea || !selectedBlock || !renameBlockValue.trim()) return
+    setSaving(true)
+    try {
+      await apiFetch(`/api/knowledge/areas/${selectedArea.id}/blocks/rename`, {
+        method: 'POST',
+        body: JSON.stringify({ oldName: selectedBlock, newName: renameBlockValue.trim() }),
+      })
+      setDocuments((prev) => prev.map((d) => ((d.block || d.title) === selectedBlock ? { ...d, block: renameBlockValue.trim() } : d)))
+      setSelectedBlock(renameBlockValue.trim())
+      setRenamingBlock(false)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const openTeamEdit = () => {
+    setTeamMetaTitle(selectedDoc.title)
+    setTeamMetaBlock(selectedDoc.block || selectedDoc.title)
+    setTeamMetaAreaId(selectedDoc.areaId || selectedArea?.id || '')
+    setEditingTeam(true)
+  }
+
+  const saveTeamMeta = async (e) => {
+    e.preventDefault()
+    if (!selectedDoc) return
+    setSaving(true)
+    try {
+      const patch = { title: teamMetaTitle.trim(), block: teamMetaBlock.trim(), areaId: teamMetaAreaId }
+      const updated = await apiFetch(`/api/knowledge/documents/${selectedDoc.id}/meta`, { method: 'PATCH', body: JSON.stringify(patch) })
+      setSelectedDoc(updated)
+      setEditingTeam(false)
+      if (selectedArea) {
+        const { documents: docs } = await apiFetch(`/api/knowledge/areas/${selectedArea.id}/documents`)
+        setDocuments(docs)
+        // The team may have moved to a different block, or out of this area entirely.
+        if (patch.areaId !== selectedArea.id) {
+          setSelectedDoc(null)
+          setSelectedBlock(null)
+        } else {
+          setSelectedBlock(patch.block)
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const addVersion = async (e) => {
     e.preventDefault()
     if (!selectedDoc || !newVersionContent.trim()) return
@@ -197,6 +277,10 @@ export default function Knowledge() {
 
       {error && <div className="info-note" style={{ margin: '16px 0' }}><span>{error}</span></div>}
 
+      <datalist id="kb-block-suggestions">
+        {blockNames.map((b) => <option key={b} value={b} />)}
+      </datalist>
+
       {showAreaForm && (
         <form onSubmit={createArea} className="card" style={{ padding: 16, marginBottom: 20 }}>
           <div className="section-title">Nueva área</div>
@@ -232,9 +316,6 @@ export default function Knowledge() {
             list="kb-block-suggestions"
             style={{ display: 'block', width: '100%', marginBottom: 10 }}
           />
-          <datalist id="kb-block-suggestions">
-            {blockNames.map((b) => <option key={b} value={b} />)}
-          </datalist>
           <textarea
             placeholder="Contenido"
             value={newDocContent}
@@ -277,13 +358,29 @@ export default function Knowledge() {
         <div className="kb-col">
           {areas.map((a, i) => (
             <div key={a.id}>
-              <button className={`kb-area ${selectedArea?.id === a.id ? 'on' : ''}`} onClick={() => openArea(a)}>
-                <span className="dot" style={{ background: DOTS[i % DOTS.length] }}></span>
-                {a.name}
-                <svg className="kb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d={selectedArea?.id === a.id ? 'M6 15l6-6 6 6' : 'M9 6l6 6-6 6'} />
-                </svg>
-              </button>
+              <div className="kb-area-row">
+                <button className={`kb-area ${selectedArea?.id === a.id ? 'on' : ''}`} onClick={() => openArea(a)}>
+                  <span className="dot" style={{ background: DOTS[i % DOTS.length] }}></span>
+                  {a.name}
+                  <svg className="kb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d={selectedArea?.id === a.id ? 'M6 15l6-6 6 6' : 'M9 6l6 6-6 6'} />
+                  </svg>
+                </button>
+                {canPublish(profile?.role) && (
+                  <button
+                    className="kb-edit-btn"
+                    title="Renombrar área"
+                    onClick={() => { setRenamingAreaId(a.id); setRenameAreaValue(a.name) }}
+                  >✎</button>
+                )}
+              </div>
+              {renamingAreaId === a.id && (
+                <form onSubmit={renameArea} className="kb-rename-form">
+                  <input value={renameAreaValue} onChange={(e) => setRenameAreaValue(e.target.value)} autoFocus />
+                  <button className="btn-text" type="submit" disabled={saving}>Guardar</button>
+                  <button className="btn-text" type="button" onClick={() => setRenamingAreaId(null)}>Cancelar</button>
+                </form>
+              )}
               {selectedArea?.id === a.id && (
                 <div className="kb-block-list">
                   {blockNames.map((block) => (
@@ -306,7 +403,23 @@ export default function Knowledge() {
         <div className="kb-col">
           {selectedBlock ? (
             <>
-              <div className="kb-block-label">{selectedBlock}</div>
+              <div className="kb-area-row">
+                <div className="kb-block-label" style={{ padding: '6px 0 10px' }}>{selectedBlock}</div>
+                {canPublish(profile?.role) && (
+                  <button
+                    className="kb-edit-btn"
+                    title="Renombrar bloque"
+                    onClick={() => { setRenamingBlock((v) => !v); setRenameBlockValue(selectedBlock) }}
+                  >✎</button>
+                )}
+              </div>
+              {renamingBlock && (
+                <form onSubmit={renameBlock} className="kb-rename-form">
+                  <input value={renameBlockValue} onChange={(e) => setRenameBlockValue(e.target.value)} autoFocus />
+                  <button className="btn-text" type="submit" disabled={saving}>Guardar</button>
+                  <button className="btn-text" type="button" onClick={() => setRenamingBlock(false)}>Cancelar</button>
+                </form>
+              )}
               {teamsInSelectedBlock.map((d) => (
                 <button key={d.id} className={`kb-team ${selectedDoc?.id === d.id ? 'on' : ''}`} onClick={() => openDoc(d)}>
                   <span>{d.title}</span>
@@ -322,7 +435,14 @@ export default function Knowledge() {
         <div className="kb-reader">
           {selectedDoc ? (
             <>
-              <h3>{selectedDoc.title}</h3>
+              <div className="kb-area-row">
+                <h3>{selectedDoc.title}</h3>
+                {canPublish(profile?.role) && (
+                  <button className="btn-text" onClick={() => (editingTeam ? setEditingTeam(false) : openTeamEdit())}>
+                    {editingTeam ? 'Cerrar' : 'Editar equipo'}
+                  </button>
+                )}
+              </div>
               <div className="kb-reader-meta">
                 <span>✍️ {latestVersion?.updatedByEmail || 'sin especificar'}</span>
                 <span>🕓 versión {selectedDoc.currentVersion || 1}</span>
@@ -330,6 +450,23 @@ export default function Knowledge() {
                   <button className="btn-text" onClick={() => setShowVersionForm((v) => !v)}>Nueva versión</button>
                 )}
               </div>
+
+              {editingTeam && (
+                <form onSubmit={saveTeamMeta} className="card" style={{ padding: 16, marginBottom: 18 }}>
+                  <div className="field"><label>Nombre del equipo</label>
+                    <input value={teamMetaTitle} onChange={(e) => setTeamMetaTitle(e.target.value)} />
+                  </div>
+                  <div className="field"><label>Bloque</label>
+                    <input value={teamMetaBlock} onChange={(e) => setTeamMetaBlock(e.target.value)} list="kb-block-suggestions" />
+                  </div>
+                  <div className="field"><label>Unidad de negocio</label>
+                    <select value={teamMetaAreaId} onChange={(e) => setTeamMetaAreaId(e.target.value)}>
+                      {areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                  <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Guardar cambios</button>
+                </form>
+              )}
 
               {showVersionForm && (
                 <form onSubmit={addVersion} className="card" style={{ padding: 16, marginBottom: 18 }}>

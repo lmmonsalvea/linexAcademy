@@ -30,15 +30,6 @@ export default function Courses(){
     return () => { cancelled = true }
   }, [])
 
-  const handleEnroll = async (courseId) => {
-    try {
-      await apiFetch(`/api/courses/${courseId}/enroll`, { method: 'POST' })
-      setCourses(prev => prev.map(c => c.id === courseId ? { ...c, enrolled: true } : c))
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
   if (courses === null) {
     return <AppShell active="courses"><div className="page-loading">Cargando cursos…</div></AppShell>
   }
@@ -53,7 +44,7 @@ export default function Courses(){
           <h2>Catálogo de cursos</h2>
           <div className="info-note" style={{ marginTop: 10 }}>
             <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v5h1" /></svg>
-            <span>Cualquier persona puede inscribirse y avanzar a su ritmo. Al completar todos los módulos se habilita el certificado descargable.</span>
+            <span>Cada curso se asigna automáticamente según tu unidad de negocio y bloque de trabajo — avanza a tu ritmo. Al completar todos los módulos se habilita el certificado descargable.</span>
           </div>
         </div>
         {canCreate(profile?.role) && (
@@ -77,7 +68,7 @@ export default function Courses(){
       <div className="course-grid">
         {visible.map((c, i) => (
           <div key={c.id} className="card course-card">
-            <Link to={`/courses/${c.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+            <Link to={`/courses/${c.id}`} className="course-link">
               <div className="course-cover" style={{ background: COVERS[i % COVERS.length] }}>
                 {c.area && <span className="tag">{c.area}</span>}
               </div>
@@ -87,12 +78,8 @@ export default function Courses(){
                 <span className="course-meta"><span>🎬 {c.modules.length} módulo{c.modules.length === 1 ? '' : 's'}</span></span>
               </div>
             </Link>
-            <div style={{ padding: '0 18px 18px' }}>
-              {c.enrolled ? (
-                <span className="pill pill-success">Inscrito</span>
-              ) : (
-                <button className="btn btn-primary btn-sm btn-block" onClick={() => handleEnroll(c.id)}>Inscribirme</button>
-              )}
+            <div className="course-card-footer">
+              <Link to={`/courses/${c.id}`} className="btn btn-primary btn-sm btn-block">Ver curso</Link>
             </div>
           </div>
         ))}

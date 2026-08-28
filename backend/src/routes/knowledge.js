@@ -7,7 +7,7 @@ const { asyncRoute } = require('../middleware/errorHandler');
 
 const router = express.Router();
 
-const canManageContent = requireRole('admin_area', 'knowledge_manager', 'superadmin');
+const canManageContent = requireRole('admin_area', 'superadmin');
 
 // Tokenizes free text into lowercase word tokens. Used both to build the
 // `searchTokens` index at write time and to tokenize the `q` search param —
@@ -63,6 +63,49 @@ router.post('/areas', canManageContent, asyncRoute(async (req, res) => {
   const doc = { name, description: description || '', createdAt: new Date().toISOString() };
   const ref = await db.collection('knowledgeAreas').add(doc);
   res.json({ id: ref.id, ...doc });
+}));
+
+const areaUpdateSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  description: z.string().trim().optional(),
+});
+
+// PATCH /api/knowledge/areas/:id — rename a business unit / change its
+// description. Content managers only.
+router.patch('/areas/:id', canManageContent, asyncRoute(async (req, res) => {
+  const data = validate(areaUpdateSchema, req.body);
+  const ref = db.collection('knowledgeAreas').doc(req.params.id);
+  const snap = await ref.get();
+  if (!snap.exists) throw { status: 404, message: 'Área no encontrada' };
+
+  const patch = {};
+  if (data.name !== undefined) patch.name = data.name;
+  if (data.description !== undefined) patch.description = data.description;
+  await ref.update(patch);
+  res.json({ id: ref.id, ...snap.data(), ...patch });
+}));
+
+const blockRenameSchema = z.object({
+  oldName: z.string().trim().min(1),
+  newName: z.string().trim().min(1),
+});
+
+// POST /api/knowledge/areas/:id/blocks/rename — a "bloque" isn't its own
+// Firestore entity, just a string every team (document) in it shares — so
+// renaming one means bulk-updating every document in this area whose
+// `block` matches the old name. Content managers only.
+router.post('/areas/:id/blocks/rename', canManageContent, asyncRoute(async (req, res) => {
+  const { oldName, newName } = validate(blockRenameSchema, req.body);
+  const snap = await db.collection('knowledgeDocuments')
+    .where('areaId', '==', req.params.id)
+    .where('block', '==', oldName)
+    .get();
+  if (snap.empty) throw { status: 404, message: 'Ningún equipo usa ese bloque en esta área' };
+
+  const batch = db.batch();
+  snap.docs.forEach((d) => batch.update(d.ref, { block: newName }));
+  await batch.commit();
+  res.json({ renamed: snap.size });
 }));
 
 // GET /api/knowledge/areas/:id/documents — any authenticated user. List
@@ -156,6 +199,42 @@ router.post('/documents/:id/version', canManageContent, asyncRoute(async (req, r
   });
 
   res.json({ id: ref.id, version: newVersion });
+}));
+
+const documentMetaSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  block: z.string().trim().min(1).optional(),
+  areaId: z.string().trim().min(1).optional(),
+});
+
+// PATCH /api/knowledge/documents/:id/meta — rename a team, and/or move it to
+// a different block/business unit. Separate from POST .../version, which is
+// for content changes only. Content managers only.
+router.patch('/documents/:id/meta', canManageContent, asyncRoute(async (req, res) => {
+  const data = validate(documentMetaSchema, req.body);
+  const ref = db.collection('knowledgeDocuments').doc(req.params.id);
+  const snap = await ref.get();
+  if (!snap.exists) throw { status: 404, message: 'Documento no encontrado' };
+  const existing = snap.data();
+
+  const patch = {};
+  if (data.areaId !== undefined) patch.areaId = data.areaId;
+  if (data.title !== undefined) patch.title = data.title;
+
+  if (data.block !== undefined) {
+    patch.block = data.block;
+  } else if (data.title !== undefined && existing.block === existing.title) {
+    // This team was its own standalone block (block === its old title) —
+    // keep that in sync with the rename instead of leaving a stale block
+    // name nothing else points to.
+    patch.block = data.title;
+  }
+
+  const newTitle = patch.title !== undefined ? patch.title : existing.title;
+  patch.searchTokens = computeSearchTokens({ title: newTitle, content: existing.content, tags: existing.tags });
+
+  await ref.update(patch);
+  res.json({ id: ref.id, ...existing, ...patch });
 }));
 
 // GET /api/knowledge/search?q= — any authenticated user. Tokenized keyword

@@ -82,7 +82,7 @@ const submitSchema = z.object({
 // stripped per-question snapshot inside their own attempt (see POST /tests).
 router.post(
   '/questions',
-  requireRole('admin_rrhh', 'superadmin'),
+  requireRole('instructor', 'superadmin'),
   asyncRoute(async (req, res) => {
     const data = validate(questionSchema, req.body);
     const doc = stripUndefined({ ...data, createdAt: new Date().toISOString() });
@@ -93,7 +93,7 @@ router.post(
 
 router.get(
   '/questions',
-  requireRole('admin_rrhh', 'superadmin'),
+  requireRole('instructor', 'superadmin'),
   asyncRoute(async (req, res) => {
     const snap = await questionsCol().orderBy('createdAt', 'desc').get();
     res.json({ questions: snap.docs.map((d) => ({ id: d.id, ...d.data() })) });
@@ -103,7 +103,7 @@ router.get(
 // --- Templates ----------------------------------------------------------
 router.post(
   '/templates',
-  requireRole('admin_rrhh', 'superadmin'),
+  requireRole('instructor', 'superadmin'),
   asyncRoute(async (req, res) => {
     const data = validate(templateSchema, req.body);
     const doc = stripUndefined({ ...data, createdAt: new Date().toISOString() });
@@ -114,7 +114,7 @@ router.post(
 
 router.get(
   '/templates',
-  requireRole('admin_rrhh', 'superadmin'),
+  requireRole('instructor', 'superadmin'),
   asyncRoute(async (req, res) => {
     const snap = await templatesCol().orderBy('createdAt', 'desc').get();
     res.json({ templates: snap.docs.map((d) => ({ id: d.id, ...d.data() })) });
@@ -217,7 +217,7 @@ router.post(
 // collision either way.
 router.get(
   '/tests/report',
-  requireRole('admin_rrhh', 'superadmin'),
+  requireRole('instructor', 'superadmin'),
   asyncRoute(async (req, res) => {
     const { templateId } = req.query;
     if (!templateId) throw { status: 400, message: 'Falta el parámetro templateId' };
@@ -259,15 +259,15 @@ router.get(
     if (!snap.exists) throw { status: 404, message: 'Evaluación no encontrada' };
     const attempt = snap.data();
     const isOwner = attempt.uid === req.user.uid;
-    const isRRHH = ['admin_rrhh', 'superadmin'].includes(req.user.role);
-    if (!isOwner && !isRRHH) throw { status: 403, message: 'No autorizado' };
+    const canManage = ['instructor', 'superadmin'].includes(req.user.role);
+    if (!isOwner && !canManage) throw { status: 403, message: 'No autorizado' };
     res.json({ id: snap.id, ...attempt });
   })
 );
 
 router.get(
   '/tests/:id/export.csv',
-  requireRole('admin_rrhh', 'superadmin'),
+  requireRole('instructor', 'superadmin'),
   asyncRoute(async (req, res) => {
     const snap = await attemptsCol().doc(req.params.id).get();
     if (!snap.exists) throw { status: 404, message: 'Evaluación no encontrada' };

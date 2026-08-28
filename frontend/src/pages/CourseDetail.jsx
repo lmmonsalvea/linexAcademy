@@ -8,16 +8,16 @@ import { useAuth } from '../utils/auth'
 const MODULE_ICON = { video: '▶', pdf: '📄', scorm: '🧩', quiz: '📝', link: '🔗' }
 const MODULE_LABEL = { video: 'Vídeo', pdf: 'PDF · lectura', scorm: 'Paquete SCORM', quiz: 'Quiz', link: 'Enlace externo' }
 const canEditCourse = (role) => ['instructor', 'admin_area', 'superadmin'].includes(role)
-const emptyModule = () => ({ type: 'video', title: '', url: '' })
+const emptyModule = () => ({ type: 'video', title: '', url: '', hidden: false })
 
 export default function CourseDetail(){
   const { id } = useParams()
   const navigate = useNavigate()
   const { profile } = useAuth()
+  const isManager = canEditCourse(profile?.role)
 
   const [course, setCourse] = useState(null)
   const [error, setError] = useState('')
-  const [enrolling, setEnrolling] = useState(false)
   const [downloading, setDownloading] = useState(false)
 
   const [editing, setEditing] = useState(false)
@@ -37,6 +37,17 @@ export default function CourseDetail(){
   }, [id])
 
   useEffect(() => { load() }, [load])
+
+  // People are handed their work path, they don't sign themselves up — but
+  // course-assignment sync (enrollmentSync.js) can lag a moment behind a
+  // brand-new assignment. If this course is visible to someone (the GET
+  // above didn't 403) and they're just not enrolled yet, quietly fix that
+  // instead of showing a button. Managers viewing a course to edit it
+  // aren't "taking" it, so this is skipped for them.
+  useEffect(() => {
+    if (!course || course.enrolled || isManager) return
+    apiFetch(`/api/courses/${id}/enroll`, { method: 'POST' }).then(load).catch(() => {})
+  }, [course, isManager, id, load])
 
   const openEdit = () => {
     setEditTitle(course.title)
@@ -73,18 +84,6 @@ export default function CourseDetail(){
       setError(err.message)
     } finally {
       setSaving(false)
-    }
-  }
-
-  const enroll = async () => {
-    setEnrolling(true)
-    try {
-      await apiFetch(`/api/courses/${id}/enroll`, { method: 'POST' })
-      await load()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setEnrolling(false)
     }
   }
 
@@ -127,7 +126,7 @@ export default function CourseDetail(){
       <div className="course-hero" style={{ background: 'linear-gradient(120deg,#5B5CFF,#6D28D9 60%,#17153B)', marginTop: 14 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
           <h2>{course.title}</h2>
-          {canEditCourse(profile?.role) && (
+          {isManager && (
             <button className="btn btn-ghost btn-sm" onClick={openEdit}>Editar curso</button>
           )}
         </div>
@@ -141,11 +140,6 @@ export default function CourseDetail(){
           <div className="pill pill-accent" style={{ marginTop: 10 }} title={course.updateNote || ''}>
             🔄 Actualizado el {new Date(course.updatedAt).toLocaleDateString('es-CO')}
           </div>
-        )}
-        {!isEnrolled && (
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={enroll} disabled={enrolling}>
-            {enrolling ? 'Inscribiendo…' : 'Inscribirme'}
-          </button>
         )}
       </div>
 
@@ -165,7 +159,7 @@ export default function CourseDetail(){
 
           <div className="section-title" style={{ marginTop: 16 }}>¿Para quién es este curso?</div>
           <p style={{ color: 'var(--text-dim)', fontSize: '.82rem', margin: '4px 0 10px' }}>
-            Sin nada seleccionado, queda abierto a todos.
+            Sin nada seleccionado, queda abierto a todos. Al guardar, se asigna automáticamente a las personas de la unidad/bloque elegidos — no tienen que inscribirse.
           </p>
           <AssignmentPicker
             assignedAreaIds={editAreaIds}
@@ -190,6 +184,10 @@ export default function CourseDetail(){
               {m.type !== 'quiz' && (
                 <div className="field"><label>URL</label><input value={m.url || ''} onChange={e => updateEditModule(i, 'url', e.target.value)} /></div>
               )}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.84rem', color: 'var(--text-dim)' }}>
+                <input type="checkbox" checked={!!m.hidden} onChange={e => updateEditModule(i, 'hidden', e.target.checked)} />
+                Ocultar este módulo (queda guardado, pero no lo ven los estudiantes ni cuenta para el progreso)
+              </label>
             </div>
           ))}
           <button type="button" className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={() => setEditModules([...editModules, emptyModule()])}>+ Agregar módulo</button>
@@ -225,11 +223,11 @@ export default function CourseDetail(){
             </div>
           )}
           {course.modules.map((m, i) => (
-            <div key={m.id} className={`module-row ${isDone(m) ? 'done' : isEnrolled ? 'current' : 'locked'}`}>
+            <div key={m.id} className={`module-row ${isDone(m) ? 'done' : (isEnrolled || isManager) ? 'current' : 'locked'}`}>
               <div className="module-ic">{MODULE_ICON[m.type] || '•'}</div>
               <div className="txt">
                 <b>{i + 1}. {m.title}</b>
-                <span>{MODULE_LABEL[m.type] || m.type}</span>
+                <span>{MODULE_LABEL[m.type] || m.type}{m.hidden ? ' · Oculto' : ''}</span>
               </div>
 
               {m.type === 'video' && m.url && (
@@ -252,32 +250,34 @@ export default function CourseDetail(){
                 <span className="pill pill-success">Completado</span>
               ) : isEnrolled ? (
                 <button className="btn btn-ghost btn-sm" onClick={() => completeModule(m.id)}>Marcar como completado</button>
-              ) : (
-                <span className="pill pill-locked">Inscríbete para avanzar</span>
-              )}
+              ) : !isManager ? (
+                <span className="pill pill-locked">No disponible</span>
+              ) : null}
             </div>
           ))}
         </div>
 
-        <div>
-          <div className="section-title">Tu certificado</div>
-          <div className="card cert-card">
-            <div className="cert-ring" style={{ background: `conic-gradient(var(--blueviolet) 0 ${percent}%, var(--surface-2) ${percent}% 100%)` }}>{percent}%</div>
-            {percent === 100 ? (
-              <>
-                <p style={{ color: 'var(--text-dim)', fontSize: '.86rem', marginBottom: 16 }}>¡Completaste el curso! Tu certificado ya está disponible.</p>
-                <button className="btn btn-primary btn-sm" onClick={downloadCertificate} disabled={downloading}>
-                  {downloading ? 'Generando…' : 'Descargar certificado'}
-                </button>
-              </>
-            ) : (
-              <>
-                <p style={{ color: 'var(--text-dim)', fontSize: '.86rem', marginBottom: 16 }}>Completa todos los módulos para desbloquear tu certificado.</p>
-                <button className="btn btn-ghost btn-sm" disabled>🔒 Certificado bloqueado</button>
-              </>
-            )}
+        {isEnrolled && (
+          <div>
+            <div className="section-title">Tu certificado</div>
+            <div className="card cert-card">
+              <div className="cert-ring" style={{ background: `conic-gradient(var(--blueviolet) 0 ${percent}%, var(--surface-2) ${percent}% 100%)` }}>{percent}%</div>
+              {percent === 100 ? (
+                <>
+                  <p style={{ color: 'var(--text-dim)', fontSize: '.86rem', marginBottom: 16 }}>¡Completaste el curso! Tu certificado ya está disponible.</p>
+                  <button className="btn btn-primary btn-sm" onClick={downloadCertificate} disabled={downloading}>
+                    {downloading ? 'Generando…' : 'Descargar certificado'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p style={{ color: 'var(--text-dim)', fontSize: '.86rem', marginBottom: 16 }}>Completa todos los módulos para desbloquear tu certificado.</p>
+                  <button className="btn btn-ghost btn-sm" disabled>🔒 Certificado bloqueado</button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </AppShell>
   )

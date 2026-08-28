@@ -234,7 +234,9 @@ input, select, textarea{ font-family:var(--font-display); }
 .course-card:hover{ transform:translateY(-3px); box-shadow:0 24px 48px -20px rgba(23,21,59,.22); }
 .course-cover{ height:120px; position:relative; display:flex; align-items:flex-end; padding:14px; }
 .course-cover .tag{ background:rgba(255,255,255,.9); color:var(--navy); font-size:.7rem; font-weight:700; padding:3px 9px; border-radius:99px; }
+.course-link{ display:flex; flex-direction:column; flex:1; min-height:0; }
 .course-body{ padding:16px 18px 18px; display:flex; flex-direction:column; gap:10px; flex:1; }
+.course-card-footer{ padding:0 18px 18px; margin-top:auto; }
 .course-body h3{ font-size:1rem; }
 .course-meta{ display:flex; gap:14px; font-size:.76rem; color:var(--text-dim); flex-wrap:wrap; }
 .course-progress-row{ display:flex; align-items:center; gap:10px; margin-top:auto; }
@@ -287,6 +289,14 @@ input, select, textarea{ font-family:var(--font-display); }
 .kb-reader-body{ line-height:1.7; color:var(--text); max-width:66ch; font-size:.94rem; white-space:pre-wrap; }
 .tag-row{ display:flex; gap:6px; margin-top:16px; flex-wrap:wrap; }
 .kb-empty{ color:var(--text-dim); font-size:.88rem; padding:20px; }
+.kb-area-row{ display:flex; align-items:center; gap:4px; }
+.kb-area-row .kb-area{ flex:1; }
+.kb-area-row h3{ flex:1; margin:0; }
+.kb-edit-btn{ flex:none; width:26px; height:26px; border-radius:7px; color:var(--text-dim); opacity:0; transition:opacity .12s ease; }
+.kb-area-row:hover .kb-edit-btn{ opacity:1; }
+.kb-edit-btn:hover{ background:var(--surface-2); color:var(--violet); }
+.kb-rename-form{ display:flex; gap:8px; align-items:center; margin:2px 0 8px 22px; }
+.kb-rename-form input{ flex:1; padding:6px 8px; border-radius:8px; border:1px solid var(--border); font-size:.82rem; }
 
 /* assignment picker (course scoping / user business-unit assignment) */
 .assignment-picker{ border:1px solid var(--border-soft); border-radius:var(--radius); padding:10px; max-height:280px; overflow-y:auto; }

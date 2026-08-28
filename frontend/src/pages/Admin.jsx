@@ -4,13 +4,11 @@ import AssignmentPicker from '../components/AssignmentPicker'
 import { apiFetch } from '../utils/api'
 import { useAuth } from '../utils/auth'
 
-const ROLES = ['empleado', 'instructor', 'admin_area', 'admin_rrhh', 'knowledge_manager', 'superadmin']
+const ROLES = ['empleado', 'instructor', 'admin_area', 'superadmin']
 const ROLE_LABELS = {
   empleado: 'Empleado',
   instructor: 'Instructor',
   admin_area: 'Admin Área',
-  admin_rrhh: 'Admin RRHH',
-  knowledge_manager: 'Knowledge Manager',
   superadmin: 'Superadmin',
 }
 

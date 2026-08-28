@@ -7,8 +7,6 @@ const ROLE_LABELS = {
   empleado: 'Empleado',
   instructor: 'Instructor',
   admin_area: 'Admin Área',
-  admin_rrhh: 'Admin RRHH',
-  knowledge_manager: 'Knowledge Manager',
   superadmin: 'Superadmin'
 }
 
@@ -28,7 +26,6 @@ export default function AppShell({ active, children }) {
   const navigate = useNavigate()
   const { profile, signOut } = useAuth()
   const user = profile
-  const canSeeRRHH = ['admin_rrhh', 'superadmin'].includes(user?.role)
   const canSeeAdmin = user?.role === 'superadmin'
 
   const logout = async () => {
@@ -47,15 +44,6 @@ export default function AppShell({ active, children }) {
               {n.label}
             </Link>
           ))}
-          {canSeeRRHH && (
-            <Link to="/rrhh" className={`nav-item ${active === 'rrhh' ? 'on' : ''}`}>
-              <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M4 20v-1a5 5 0 0 1 5-5h1a5 5 0 0 1 5 5v1M15 4.2a3.2 3.2 0 1 1 0 6.2M17 20v-1a4.2 4.2 0 0 0-2.3-3.7" />
-                <circle cx="9" cy="9" r="3.4" />
-              </svg>
-              Panel RRHH
-            </Link>
-          )}
           {canSeeAdmin && (
             <Link to="/admin" className={`nav-item ${active === 'admin' ? 'on' : ''}`}>
               <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
