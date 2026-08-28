@@ -25,9 +25,18 @@ async function verifyToken(req, res, next) {
       return next({ status: 401, message: 'Falta el token de autenticación' });
     }
 
-    // checkRevoked=true so a superadmin disabling someone takes effect
-    // immediately, not just after their existing ID token naturally expires.
-    const decoded = await auth.verifyIdToken(match[1], true);
+    // NOT using checkRevoked here: it requires the Cloud Run service
+    // account to call the Firebase Auth Admin API (getUser), which needs an
+    // IAM role (roles/firebaseauth.admin or similar) this project's shared
+    // default compute service account doesn't have — granting it would
+    // affect every other app on that same default SA in this shared GCP
+    // project, not just this one. Not worth it anyway: the `disabled` check
+    // below reads Firestore fresh on every request regardless of token
+    // expiry, so a disabled account is rejected on its very next call either
+    // way — checkRevoked would only additionally cover the token-signature
+    // layer, which isn't the scenario we actually need (see users.js
+    // PATCH /:uid/status).
+    const decoded = await auth.verifyIdToken(match[1]);
     const email = decoded.email;
 
     if (!email || !decoded.email_verified) {
