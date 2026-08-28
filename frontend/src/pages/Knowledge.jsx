@@ -11,6 +11,7 @@ export default function Knowledge() {
   const [areas, setAreas] = useState([])
   const [selectedArea, setSelectedArea] = useState(null)
   const [documents, setDocuments] = useState([])
+  const [selectedBlock, setSelectedBlock] = useState(null)
   const [selectedDoc, setSelectedDoc] = useState(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null)
@@ -42,17 +43,33 @@ export default function Knowledge() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Clicking a business unit expands it in place (column 1) to show its
+  // blocks — it no longer immediately opens a document.
   const openArea = (area) => {
+    if (selectedArea?.id === area.id) {
+      // Clicking the already-expanded area again collapses it.
+      setSelectedArea(null)
+      setDocuments([])
+      setSelectedBlock(null)
+      setSelectedDoc(null)
+      return
+    }
     setSelectedArea(area)
+    setSelectedBlock(null)
     setSelectedDoc(null)
     setResults(null)
     setShowDocForm(false)
     apiFetch(`/api/knowledge/areas/${area.id}/documents`)
-      .then(({ documents: docs }) => {
-        setDocuments(docs)
-        if (docs[0]) openDoc(docs[0])
-      })
+      .then(({ documents: docs }) => setDocuments(docs))
       .catch((err) => setError(err.message))
+  }
+
+  // Clicking a block (nested under its expanded area) shows that block's
+  // teams in column 2.
+  const openBlock = (block) => {
+    setSelectedBlock(block)
+    setSelectedDoc(null)
+    setShowDocForm(false)
   }
 
   const openDoc = (doc) => {
@@ -104,6 +121,7 @@ export default function Knowledge() {
         body: JSON.stringify({ title: newDocTitle, content: newDocContent, tags, block: newDocBlock || undefined }),
       })
       setDocuments((prev) => [...prev, doc])
+      setSelectedBlock(doc.block || doc.title)
       setSelectedDoc(doc)
       setNewDocTitle('')
       setNewDocBlock('')
@@ -142,15 +160,16 @@ export default function Knowledge() {
 
   const latestVersion = selectedDoc?.versions?.[selectedDoc.versions.length - 1]
 
-  // Group the area's teams (documents) by the "bloque" they belong to, so
-  // e.g. Travel Operations shows as a header over Core Operations, L1 & L2
-  // Service Desk, etc. — a team with no block set is its own standalone
-  // block (server already defaults `block` to the team's own title).
+  // Group the expanded area's teams (documents) by the "bloque" they belong
+  // to — a team with no block set is its own standalone block (server
+  // already defaults `block` to the team's own title).
   const documentsByBlock = documents.reduce((acc, d) => {
     const block = d.block || d.title
     ;(acc[block] ||= []).push(d)
     return acc
   }, {})
+  const blockNames = Object.keys(documentsByBlock)
+  const teamsInSelectedBlock = selectedBlock ? documentsByBlock[selectedBlock] || [] : []
 
   return (
     <AppShell active="knowledge">
@@ -170,7 +189,7 @@ export default function Knowledge() {
               disabled={!selectedArea}
               onClick={() => setShowDocForm((v) => !v)}
             >
-              + Publicar documento
+              + Publicar equipo
             </button>
           </div>
         )}
@@ -199,7 +218,7 @@ export default function Knowledge() {
 
       {showDocForm && selectedArea && (
         <form onSubmit={createDocument} className="card" style={{ padding: 16, marginBottom: 20 }}>
-          <div className="section-title">Nuevo documento en {selectedArea.name}</div>
+          <div className="section-title">Nuevo equipo de trabajo en {selectedArea.name}</div>
           <input
             placeholder="Nombre del equipo de trabajo"
             value={newDocTitle}
@@ -210,8 +229,12 @@ export default function Knowledge() {
             placeholder="Bloque al que pertenece (opcional — vacío si el equipo es su propio bloque)"
             value={newDocBlock}
             onChange={(e) => setNewDocBlock(e.target.value)}
+            list="kb-block-suggestions"
             style={{ display: 'block', width: '100%', marginBottom: 10 }}
           />
+          <datalist id="kb-block-suggestions">
+            {blockNames.map((b) => <option key={b} value={b} />)}
+          </datalist>
           <textarea
             placeholder="Contenido"
             value={newDocContent}
@@ -253,27 +276,47 @@ export default function Knowledge() {
       <div className="kb-grid">
         <div className="kb-col">
           {areas.map((a, i) => (
-            <button key={a.id} className={`kb-area ${selectedArea?.id === a.id ? 'on' : ''}`} onClick={() => openArea(a)}>
-              <span className="dot" style={{ background: DOTS[i % DOTS.length] }}></span>
-              {a.name}
-            </button>
+            <div key={a.id}>
+              <button className={`kb-area ${selectedArea?.id === a.id ? 'on' : ''}`} onClick={() => openArea(a)}>
+                <span className="dot" style={{ background: DOTS[i % DOTS.length] }}></span>
+                {a.name}
+                <svg className="kb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d={selectedArea?.id === a.id ? 'M6 15l6-6 6 6' : 'M9 6l6 6-6 6'} />
+                </svg>
+              </button>
+              {selectedArea?.id === a.id && (
+                <div className="kb-block-list">
+                  {blockNames.map((block) => (
+                    <button
+                      key={block}
+                      className={`kb-block-item ${selectedBlock === block ? 'on' : ''}`}
+                      onClick={() => openBlock(block)}
+                    >
+                      {block}
+                    </button>
+                  ))}
+                  {blockNames.length === 0 && <p className="kb-empty">Sin bloques todavía.</p>}
+                </div>
+              )}
+            </div>
           ))}
           {areas.length === 0 && <p className="kb-empty">Aún no hay áreas.</p>}
         </div>
 
         <div className="kb-col">
-          {Object.entries(documentsByBlock).map(([block, docs]) => (
-            <div key={block} className="kb-block-group">
-              <div className="kb-block-label">{block}</div>
-              {docs.map((d) => (
-                <button key={d.id} className={`kb-doc ${selectedDoc?.id === d.id ? 'on' : ''}`} onClick={() => openDoc(d)}>
-                  <b>{d.title}</b>
-                  <span>v{d.currentVersion || 1}</span>
+          {selectedBlock ? (
+            <>
+              <div className="kb-block-label">{selectedBlock}</div>
+              {teamsInSelectedBlock.map((d) => (
+                <button key={d.id} className={`kb-team ${selectedDoc?.id === d.id ? 'on' : ''}`} onClick={() => openDoc(d)}>
+                  <span>{d.title}</span>
+                  <em>v{d.currentVersion || 1}</em>
                 </button>
               ))}
-            </div>
-          ))}
-          {selectedArea && documents.length === 0 && <p className="kb-empty">Esta área aún no tiene equipos de trabajo.</p>}
+            </>
+          ) : (
+            <p className="kb-empty">Selecciona un bloque para ver sus equipos de trabajo.</p>
+          )}
         </div>
 
         <div className="kb-reader">
@@ -304,7 +347,7 @@ export default function Knowledge() {
               <div className="kb-reader-body">{selectedDoc.content}</div>
             </>
           ) : (
-            <p className="kb-empty">Selecciona un documento para leerlo.</p>
+            <p className="kb-empty">Selecciona un equipo de trabajo para leerlo.</p>
           )}
         </div>
       </div>

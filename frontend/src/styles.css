@@ -266,19 +266,27 @@ input, select, textarea{ font-family:var(--font-display); }
 .kb-area .dot{ width:8px; height:8px; border-radius:50%; flex:none; }
 .kb-area:hover{ background:var(--surface-2); }
 .kb-area.on{ background:var(--lavender); color:var(--navy); }
-.kb-doc{ display:block; padding:10px 10px; border-radius:9px; width:100%; text-align:left; }
-.kb-doc:hover{ background:var(--surface-2); }
-.kb-doc.on{ background:var(--lavender); }
-.kb-doc b{ display:block; font-size:.84rem; }
-.kb-doc span{ font-size:.72rem; color:var(--text-dim); }
+.kb-chevron{ width:14px; height:14px; margin-left:auto; flex:none; opacity:.55; }
+
+/* Blocks nested under an expanded business unit (column 1) */
+.kb-block-list{ display:flex; flex-direction:column; gap:2px; margin:2px 0 8px 22px; }
+.kb-block-item{ display:block; padding:7px 10px; border-radius:8px; width:calc(100% - 4px); text-align:left; font-size:.8rem; font-weight:400; color:var(--text-dim); }
+.kb-block-item:hover{ background:var(--surface-2); }
+.kb-block-item.on{ background:var(--lavender); color:var(--navy); font-weight:500; }
+
+/* Teams of the selected block (column 2) — deliberately light weight, not
+   bold, so the list doesn't read as heavier than the block/area nav. */
+.kb-block-label{ font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); padding:6px 10px 10px; }
+.kb-team{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:9px 10px; border-radius:9px; width:100%; text-align:left; font-size:.86rem; font-weight:400; color:var(--text); }
+.kb-team:hover{ background:var(--surface-2); }
+.kb-team.on{ background:var(--lavender); }
+.kb-team em{ font-style:normal; font-size:.72rem; color:var(--text-dim); flex:none; }
+
 .kb-reader{ background:var(--paper); padding:26px 28px; }
 .kb-reader-meta{ display:flex; gap:14px; margin:8px 0 18px; font-size:.78rem; color:var(--text-dim); flex-wrap:wrap; }
 .kb-reader-body{ line-height:1.7; color:var(--text); max-width:66ch; font-size:.94rem; white-space:pre-wrap; }
 .tag-row{ display:flex; gap:6px; margin-top:16px; flex-wrap:wrap; }
 .kb-empty{ color:var(--text-dim); font-size:.88rem; padding:20px; }
-.kb-block-group{ margin-bottom:14px; }
-.kb-block-group:last-child{ margin-bottom:0; }
-.kb-block-label{ font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-dim); padding:6px 10px 2px; }
 
 /* exams */
 .exam-row{ display:flex; align-items:center; gap:16px; padding:18px; border-radius:12px; margin-bottom:10px; flex-wrap:wrap; }
