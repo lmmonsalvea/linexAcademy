@@ -5,8 +5,8 @@ import AssignmentPicker from '../components/AssignmentPicker'
 import { apiFetch, apiFetchBlob } from '../utils/api'
 import { useAuth } from '../utils/auth'
 
-const MODULE_ICON = { video: '▶', pdf: '📄', scorm: '🧩', quiz: '📝', link: '🔗' }
-const MODULE_LABEL = { video: 'Vídeo', pdf: 'PDF · lectura', scorm: 'Paquete SCORM', quiz: 'Quiz', link: 'Enlace externo' }
+const MODULE_ICON = { video: '▶', pdf: '📄', scorm: '🧩', quiz: '📝', link: '🔗', reading: '📖' }
+const MODULE_LABEL = { video: 'Vídeo', pdf: 'PDF · lectura', scorm: 'Paquete SCORM', quiz: 'Quiz', link: 'Enlace externo', reading: 'Lectura' }
 const canEditCourse = (role) => ['instructor', 'admin_area', 'superadmin'].includes(role)
 const emptyModule = () => ({ type: 'video', title: '', url: '', hidden: false })
 
@@ -188,10 +188,15 @@ export default function CourseDetail(){
                   <option value="scorm">SCORM</option>
                   <option value="quiz">Quiz</option>
                   <option value="link">Enlace externo</option>
+                  <option value="reading">Lectura (texto dentro de la plataforma)</option>
                 </select>
               </div>
               <div className="field"><label>Título del módulo</label><input value={m.title} onChange={e => updateEditModule(i, 'title', e.target.value)} /></div>
-              {m.type !== 'quiz' && (
+              {m.type === 'reading' ? (
+                <div className="field"><label>Contenido</label>
+                  <textarea value={m.content || ''} onChange={e => updateEditModule(i, 'content', e.target.value)} rows={10} style={{ display: 'block', width: '100%' }} />
+                </div>
+              ) : m.type !== 'quiz' && (
                 <div className="field"><label>URL</label><input value={m.url || ''} onChange={e => updateEditModule(i, 'url', e.target.value)} /></div>
               )}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.84rem', color: 'var(--text-dim)' }}>
@@ -228,9 +233,15 @@ export default function CourseDetail(){
         <div>
           <div className="section-title">Módulos</div>
           {isEnrolled && (
-            <div className="progress-track" style={{ marginBottom: 16 }}>
-              <div className="progress-fill" style={{ width: `${percent}%` }} />
-            </div>
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.82rem', color: 'var(--text-dim)', marginBottom: 6 }}>
+                <span>Progreso del curso</span>
+                <span><b>{percent}%</b> · {progress.completedModules.length}/{progress.totalModules} módulos</span>
+              </div>
+              <div className="progress-track" style={{ marginBottom: 16 }}>
+                <div className="progress-fill" style={{ width: `${percent}%` }} />
+              </div>
+            </>
           )}
           {course.modules.map((m, i) => (
             <div key={m.id} className={`module-row ${isDone(m) ? 'done' : (isEnrolled || isManager) ? 'current' : 'locked'}`}>
@@ -254,6 +265,9 @@ export default function CourseDetail(){
               )}
               {m.type === 'link' && m.url && (
                 <a href={m.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">Abrir enlace</a>
+              )}
+              {m.type === 'reading' && m.content && (
+                <div className="kb-reader-body" style={{ flexBasis: '100%', marginTop: 8 }}>{m.content}</div>
               )}
 
               {isDone(m) ? (

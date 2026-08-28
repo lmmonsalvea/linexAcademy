@@ -31,15 +31,23 @@ function computeSearchTokens({ title, content, tags }) {
   return tokenize(`${title || ''} ${content || ''} ${(tags || []).join(' ')}`);
 }
 
-// A document defaults to "private" — visible only to people whose own
-// area/block match where it lives — matching the org-chart's own grouping.
-// Marking a document "public" is what makes it visible company-wide,
-// bypassing that. Managers (admin_area/superadmin) always see everything,
-// same as courses' `seesEverything`.
-function canReadDocument(doc, user) {
-  if ((doc.visibility || 'private') === 'public') return true;
+function normalizeEmail(email) {
+  return (email || '').trim().toLowerCase();
+}
+
+// A post defaults to "private" — visible only to people whose own
+// area/block match where its team lives — matching the org-chart's own
+// grouping. Marking a post "public" makes it visible company-wide,
+// bypassing that. `sharedWithEmails` is a third, narrower channel: naming a
+// specific person's email grants them access regardless of their own
+// area/block (e.g. sharing one policy doc with someone in a different
+// team). Managers (admin_area/superadmin) always see everything, same as
+// courses' `seesEverything`.
+function canReadPost(post, user) {
+  if ((post.visibility || 'private') === 'public') return true;
   if (canManageEverything(user.role)) return true;
-  return user.areaId === doc.areaId && user.block === (doc.block || doc.title);
+  if ((post.sharedWithEmails || []).includes(normalizeEmail(user.email))) return true;
+  return user.areaId === post.areaId && user.block === (post.block || post.title);
 }
 
 function sortByOrder(items) {
@@ -57,18 +65,32 @@ const areaSchema = z.object({
   order: z.number().optional(),
 });
 
-const documentSchema = z.object({
+// A "team" (knowledgeDocuments) is now just a named container — its actual
+// documented information lives in one or more independent `knowledgePosts`
+// underneath it (see postSchema below). This is what lets "Administrativo"
+// hold both a public "Política de vacaciones" and a private "Procesos
+// disciplinarios operaciones" as two separate, independently-scoped items
+// instead of a single team-wide content blob.
+const teamSchema = z.object({
+  title: z.string().min(1),
+  block: z.string().optional(),
+  order: z.number().optional(),
+});
+
+const postSchema = z.object({
   title: z.string().min(1),
   content: z.string().min(1),
   tags: z.array(z.string()).optional(),
-  // Groups documents within an area into the org chart's "bloque" they
-  // belong to (e.g. "Travel Operations") — each document itself is a
-  // "equipo de trabajo" (team), the actual content container. Defaults to
-  // the document's own title when omitted, i.e. a standalone team that is
-  // its own block (see seed-org-chart.js).
-  block: z.string().optional(),
   order: z.number().optional(),
   visibility: z.enum(['public', 'private']).optional(),
+  sharedWithEmails: z.array(z.string().trim().email()).optional(),
+});
+
+const postMetaSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  order: z.number().optional(),
+  visibility: z.enum(['public', 'private']).optional(),
+  sharedWithEmails: z.array(z.string().trim().email()).optional(),
 });
 
 const versionSchema = z.object({
@@ -171,12 +193,17 @@ router.post('/areas/:id/blocks/rename', canManageContent, asyncRoute(async (req,
   const batch = db.batch();
   docsSnap.docs.forEach((d) => batch.update(d.ref, { block: newName }));
 
+  // Posts denormalize `block` too (see canReadPost) — keep them in sync.
+  const postsSnap = await db.collection('knowledgePosts')
+    .where('areaId', '==', req.params.id).where('block', '==', oldName).get();
+  postsSnap.docs.forEach((d) => batch.update(d.ref, { block: newName }));
+
   const usersSnap = await db.collection('users')
     .where('areaId', '==', req.params.id).where('block', '==', oldName).get();
   usersSnap.docs.forEach((d) => batch.update(d.ref, { block: newName }));
 
   await batch.commit();
-  res.json({ renamedDocuments: docsSnap.size, renamedUsers: usersSnap.size });
+  res.json({ renamedDocuments: docsSnap.size, renamedPosts: postsSnap.size, renamedUsers: usersSnap.size });
 }));
 
 // PUT /api/knowledge/areas/:id/blocks/reorder — sets order = position in
@@ -195,22 +222,18 @@ router.put('/areas/:id/blocks/reorder', canManageContent, asyncRoute(async (req,
   res.json({ blocks: reordered });
 }));
 
-// GET /api/knowledge/areas/:id/documents — any authenticated user, minus
-// private documents outside their own area/block (see canReadDocument). List
-// view only — omits content/versions to keep the payload light.
+// GET /api/knowledge/areas/:id/documents — any authenticated user. Teams are
+// just containers now (no visibility of their own — see canReadPost for the
+// actual access check, enforced per post) so this list is unfiltered.
 router.get('/areas/:id/documents', asyncRoute(async (req, res) => {
   const snap = await db.collection('knowledgeDocuments').where('areaId', '==', req.params.id).get();
   const documents = snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
-    .filter((doc) => canReadDocument(doc, req.user))
     .map((data) => ({
       id: data.id,
       title: data.title,
-      tags: data.tags || [],
       block: data.block || data.title,
       order: data.order ?? null,
-      visibility: data.visibility || 'private',
-      currentVersion: data.currentVersion,
       createdAt: data.createdAt,
     }));
   res.json({ documents: sortByOrder(documents) });
@@ -237,30 +260,16 @@ router.get('/areas/:id/blocks', asyncRoute(async (req, res) => {
   res.json({ blocks: sortByOrder(merged).map((b) => b.name) });
 }));
 
-// POST /api/knowledge/areas/:id/documents — content managers only. Documents
-// are published directly on write (no draft/review state machine — the old
-// prototype never implemented one and roles_permisos.md only describes it
-// as an aspiration).
+// POST /api/knowledge/areas/:id/documents — creates a team (a container —
+// no content of its own). Content managers only.
 router.post('/areas/:id/documents', canManageContent, asyncRoute(async (req, res) => {
-  const { title, content, tags, block, order, visibility } = validate(documentSchema, req.body);
+  const { title, block, order } = validate(teamSchema, req.body);
   const now = new Date().toISOString();
   const doc = {
     areaId: req.params.id,
     title,
-    content,
-    tags: tags || [],
     block: block || title,
     order: order ?? null,
-    visibility: visibility || 'private',
-    searchTokens: computeSearchTokens({ title, content, tags }),
-    versions: [{
-      version: 1,
-      content,
-      updatedAt: now,
-      updatedByUid: req.user.uid,
-      updatedByEmail: req.user.email,
-    }],
-    currentVersion: 1,
     createdAt: now,
   };
   const ref = await db.collection('knowledgeDocuments').add(doc);
@@ -278,25 +287,149 @@ router.put('/areas/:id/documents/reorder', canManageContent, asyncRoute(async (r
   res.json({ reordered: ids.length });
 }));
 
-// GET /api/knowledge/documents/:id — any authenticated user allowed to read
-// it (see canReadDocument). Full document including version history.
+// GET /api/knowledge/documents/:id — any authenticated user. Team metadata
+// only — no content lives here anymore, see .../posts.
 router.get('/documents/:id', asyncRoute(async (req, res) => {
   const snap = await db.collection('knowledgeDocuments').doc(req.params.id).get();
-  if (!snap.exists) throw { status: 404, message: 'Documento no encontrado' };
-  const doc = { id: snap.id, ...snap.data() };
-  if (!canReadDocument(doc, req.user)) {
-    throw { status: 403, message: 'Este documento es privado para otra unidad/bloque' };
-  }
-  res.json(doc);
+  if (!snap.exists) throw { status: 404, message: 'Equipo no encontrado' };
+  res.json({ id: snap.id, ...snap.data() });
 }));
 
-// POST /api/knowledge/documents/:id/version — content managers only. Appends
-// a new version and updates the document's current content/search index.
-router.post('/documents/:id/version', canManageContent, asyncRoute(async (req, res) => {
-  const { content } = validate(versionSchema, req.body);
+const documentMetaSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  block: z.string().trim().min(1).optional(),
+  areaId: z.string().trim().min(1).optional(),
+  order: z.number().optional(),
+});
+
+// PATCH /api/knowledge/documents/:id/meta — rename a team, move it to a
+// different block/business unit, and/or reorder it. Content managers only.
+router.patch('/documents/:id/meta', canManageContent, asyncRoute(async (req, res) => {
+  const data = validate(documentMetaSchema, req.body);
   const ref = db.collection('knowledgeDocuments').doc(req.params.id);
   const snap = await ref.get();
-  if (!snap.exists) throw { status: 404, message: 'Documento no encontrado' };
+  if (!snap.exists) throw { status: 404, message: 'Equipo no encontrado' };
+  const existing = snap.data();
+
+  const patch = {};
+  if (data.areaId !== undefined) patch.areaId = data.areaId;
+  if (data.title !== undefined) patch.title = data.title;
+  if (data.order !== undefined) patch.order = data.order;
+
+  if (data.block !== undefined) {
+    patch.block = data.block;
+  } else if (data.title !== undefined && existing.block === existing.title) {
+    // This team was its own standalone block (block === its old title) —
+    // keep that in sync with the rename instead of leaving a stale block
+    // name nothing else points to.
+    patch.block = data.title;
+  }
+
+  await ref.update(patch);
+
+  // Posts denormalize areaId/block off their team (see canReadPost) — if
+  // either changed, cascade so access checks stay correct.
+  if (patch.areaId !== undefined || patch.block !== undefined) {
+    const postsSnap = await db.collection('knowledgePosts').where('teamId', '==', req.params.id).get();
+    if (!postsSnap.empty) {
+      const batch = db.batch();
+      const postPatch = {};
+      if (patch.areaId !== undefined) postPatch.areaId = patch.areaId;
+      if (patch.block !== undefined) postPatch.block = patch.block;
+      postsSnap.docs.forEach((d) => batch.update(d.ref, postPatch));
+      await batch.commit();
+    }
+  }
+
+  res.json({ id: ref.id, ...existing, ...patch });
+}));
+
+// GET /api/knowledge/documents/:teamId/posts — any authenticated user, minus
+// posts they can't read (see canReadPost). List view only — omits
+// content/versions to keep the payload light.
+router.get('/documents/:teamId/posts', asyncRoute(async (req, res) => {
+  const snap = await db.collection('knowledgePosts').where('teamId', '==', req.params.teamId).get();
+  const posts = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((post) => canReadPost(post, req.user))
+    .map((data) => ({
+      id: data.id,
+      teamId: data.teamId,
+      title: data.title,
+      tags: data.tags || [],
+      order: data.order ?? null,
+      visibility: data.visibility || 'private',
+      sharedWithEmails: data.sharedWithEmails || [],
+      currentVersion: data.currentVersion,
+      createdAt: data.createdAt,
+    }));
+  res.json({ posts: sortByOrder(posts) });
+}));
+
+// POST /api/knowledge/documents/:teamId/posts — publish a new, independent
+// piece of information under this team. Content managers only.
+router.post('/documents/:teamId/posts', canManageContent, asyncRoute(async (req, res) => {
+  const teamRef = db.collection('knowledgeDocuments').doc(req.params.teamId);
+  const teamSnap = await teamRef.get();
+  if (!teamSnap.exists) throw { status: 404, message: 'Equipo no encontrado' };
+  const team = teamSnap.data();
+
+  const { title, content, tags, order, visibility, sharedWithEmails } = validate(postSchema, req.body);
+  const now = new Date().toISOString();
+  const doc = {
+    teamId: req.params.teamId,
+    areaId: team.areaId,
+    block: team.block || team.title,
+    title,
+    content,
+    tags: tags || [],
+    order: order ?? null,
+    visibility: visibility || 'private',
+    sharedWithEmails: (sharedWithEmails || []).map(normalizeEmail),
+    searchTokens: computeSearchTokens({ title, content, tags }),
+    versions: [{
+      version: 1,
+      content,
+      updatedAt: now,
+      updatedByUid: req.user.uid,
+      updatedByEmail: req.user.email,
+    }],
+    currentVersion: 1,
+    createdAt: now,
+  };
+  const ref = await db.collection('knowledgePosts').add(doc);
+  res.json({ id: ref.id, ...doc });
+}));
+
+// PUT /api/knowledge/documents/:teamId/posts/reorder — sets order = position
+// in the given id list. Content managers only.
+router.put('/documents/:teamId/posts/reorder', canManageContent, asyncRoute(async (req, res) => {
+  const { ids } = validate(reorderSchema, req.body);
+  const batch = db.batch();
+  ids.forEach((id, i) => batch.update(db.collection('knowledgePosts').doc(id), { order: i }));
+  await batch.commit();
+  res.json({ reordered: ids.length });
+}));
+
+// GET /api/knowledge/posts/:id — any authenticated user allowed to read it
+// (see canReadPost). Full post including version history.
+router.get('/posts/:id', asyncRoute(async (req, res) => {
+  const snap = await db.collection('knowledgePosts').doc(req.params.id).get();
+  if (!snap.exists) throw { status: 404, message: 'Publicación no encontrada' };
+  const post = { id: snap.id, ...snap.data() };
+  if (!canReadPost(post, req.user)) {
+    throw { status: 403, message: 'Esta publicación es privada o no fue compartida contigo' };
+  }
+  res.json(post);
+}));
+
+// POST /api/knowledge/posts/:id/version — content managers only. Appends a
+// new version and updates the post's current content/search index.
+router.post('/posts/:id/version', canManageContent, asyncRoute(async (req, res) => {
+  const { content } = validate(versionSchema, req.body);
+  const ref = db.collection('knowledgePosts').doc(req.params.id);
+  const snap = await ref.get();
+  if (!snap.exists) throw { status: 404, message: 'Publicación no encontrada' };
 
   const data = snap.data();
   const newVersion = (data.currentVersion || 1) + 1;
@@ -319,40 +452,23 @@ router.post('/documents/:id/version', canManageContent, asyncRoute(async (req, r
   res.json({ id: ref.id, version: newVersion });
 }));
 
-const documentMetaSchema = z.object({
-  title: z.string().trim().min(1).optional(),
-  block: z.string().trim().min(1).optional(),
-  areaId: z.string().trim().min(1).optional(),
-  order: z.number().optional(),
-  visibility: z.enum(['public', 'private']).optional(),
-});
-
-// PATCH /api/knowledge/documents/:id/meta — rename a team, move it to a
-// different block/business unit, reorder it, and/or change whether it's
-// public (company-wide) or private (restricted to its own area/block).
-// Separate from POST .../version, which is for content changes only.
-// Content managers only.
-router.patch('/documents/:id/meta', canManageContent, asyncRoute(async (req, res) => {
-  const data = validate(documentMetaSchema, req.body);
-  const ref = db.collection('knowledgeDocuments').doc(req.params.id);
+// PATCH /api/knowledge/posts/:id/meta — rename, reorder, and/or change
+// whether a specific post is public (company-wide), private (restricted to
+// its team's own area/block), or additionally shared with specific people
+// by email regardless of their own area/block. Separate from
+// .../version, which is for content changes only. Content managers only.
+router.patch('/posts/:id/meta', canManageContent, asyncRoute(async (req, res) => {
+  const data = validate(postMetaSchema, req.body);
+  const ref = db.collection('knowledgePosts').doc(req.params.id);
   const snap = await ref.get();
-  if (!snap.exists) throw { status: 404, message: 'Documento no encontrado' };
+  if (!snap.exists) throw { status: 404, message: 'Publicación no encontrada' };
   const existing = snap.data();
 
   const patch = {};
-  if (data.areaId !== undefined) patch.areaId = data.areaId;
   if (data.title !== undefined) patch.title = data.title;
   if (data.order !== undefined) patch.order = data.order;
   if (data.visibility !== undefined) patch.visibility = data.visibility;
-
-  if (data.block !== undefined) {
-    patch.block = data.block;
-  } else if (data.title !== undefined && existing.block === existing.title) {
-    // This team was its own standalone block (block === its old title) —
-    // keep that in sync with the rename instead of leaving a stale block
-    // name nothing else points to.
-    patch.block = data.title;
-  }
+  if (data.sharedWithEmails !== undefined) patch.sharedWithEmails = data.sharedWithEmails.map(normalizeEmail);
 
   const newTitle = patch.title !== undefined ? patch.title : existing.title;
   patch.searchTokens = computeSearchTokens({ title: newTitle, content: existing.content, tags: existing.tags });
@@ -361,25 +477,34 @@ router.patch('/documents/:id/meta', canManageContent, asyncRoute(async (req, res
   res.json({ id: ref.id, ...existing, ...patch });
 }));
 
-// GET /api/knowledge/search?q= — any authenticated user, minus private
-// documents outside their own area/block. Tokenized keyword search (see
-// `tokenize` above for why this replaces the old regex search).
-// `array-contains-any` is OR-only and capped at 10 values by Firestore, so
-// we slice the query tokens and then post-filter in application code to
-// require ALL tokens to match, for better precision.
+// DELETE /api/knowledge/posts/:id — content managers only.
+router.delete('/posts/:id', canManageContent, asyncRoute(async (req, res) => {
+  const ref = db.collection('knowledgePosts').doc(req.params.id);
+  const snap = await ref.get();
+  if (!snap.exists) throw { status: 404, message: 'Publicación no encontrada' };
+  await ref.delete();
+  res.json({ deleted: true });
+}));
+
+// GET /api/knowledge/search?q= — any authenticated user, minus posts they
+// can't read. Tokenized keyword search (see `tokenize` above for why this
+// replaces the old regex search). `array-contains-any` is OR-only and
+// capped at 10 values by Firestore, so we slice the query tokens and then
+// post-filter in application code to require ALL tokens to match, for
+// better precision.
 router.get('/search', asyncRoute(async (req, res) => {
   const tokens = tokenize(req.query.q);
   if (tokens.length === 0) return res.json({ documents: [] });
 
-  const snap = await db.collection('knowledgeDocuments')
+  const snap = await db.collection('knowledgePosts')
     .where('searchTokens', 'array-contains-any', tokens.slice(0, 10))
     .get();
 
   const documents = snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
-    .filter((doc) => tokens.every((t) => (doc.searchTokens || []).includes(t)))
-    .filter((doc) => canReadDocument(doc, req.user))
-    .map((doc) => ({ id: doc.id, title: doc.title, areaId: doc.areaId, tags: doc.tags || [] }));
+    .filter((post) => tokens.every((t) => (post.searchTokens || []).includes(t)))
+    .filter((post) => canReadPost(post, req.user))
+    .map((post) => ({ id: post.id, teamId: post.teamId, title: post.title, areaId: post.areaId, tags: post.tags || [] }));
 
   res.json({ documents });
 }));

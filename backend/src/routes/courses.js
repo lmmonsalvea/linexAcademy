@@ -11,7 +11,7 @@ const { syncEnrollmentsForCourse, matchesAssignment } = require('../lib/enrollme
 
 const router = express.Router();
 
-const MODULE_TYPES = ['video', 'pdf', 'scorm', 'quiz', 'link'];
+const MODULE_TYPES = ['video', 'pdf', 'scorm', 'quiz', 'link', 'reading'];
 const canManageCourses = requireRole('instructor', 'admin_area', 'superadmin');
 
 // Who may view someone else's progress/certificate — ported from
@@ -29,6 +29,10 @@ const moduleInputSchema = z.object({
   type: z.enum(MODULE_TYPES),
   title: z.string().trim().min(1, 'El título del módulo es obligatorio'),
   url: z.string().trim().optional().nullable(),
+  // Full text content for `type: 'reading'` modules — the extracted content
+  // of a Word/PDF/PPTX instructivo, shown in-app instead of just linking out
+  // to the original file.
+  content: z.string().optional().nullable(),
   // A hidden module stays in the course (editable, re-showable) but is
   // dropped from the modules array served to anyone who isn't managing the
   // catalog, and excluded from progress/certificate requirements for
@@ -78,6 +82,7 @@ function buildModule(input, order) {
     type: input.type,
     title: input.title,
     url: input.url || null,
+    content: input.content || null,
     hidden: !!input.hidden,
     order,
   };

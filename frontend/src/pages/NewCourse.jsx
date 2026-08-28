@@ -85,10 +85,15 @@ export default function NewCourse(){
                 <option value="scorm">SCORM</option>
                 <option value="quiz">Quiz</option>
                 <option value="link">Enlace externo</option>
+                <option value="reading">Lectura (texto dentro de la plataforma)</option>
               </select>
             </div>
             <div className="field"><label>Título del módulo</label><input value={m.title} onChange={e => updateModule(i, 'title', e.target.value)} /></div>
-            {m.type !== 'quiz' && (
+            {m.type === 'reading' ? (
+              <div className="field"><label>Contenido</label>
+                <textarea value={m.content || ''} onChange={e => updateModule(i, 'content', e.target.value)} rows={10} style={{ display: 'block', width: '100%' }} />
+              </div>
+            ) : m.type !== 'quiz' && (
               <div className="field"><label>URL</label><input value={m.url} onChange={e => updateModule(i, 'url', e.target.value)} placeholder="https://..." /></div>
             )}
           </div>
