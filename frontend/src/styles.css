@@ -288,6 +288,13 @@ input, select, textarea{ font-family:var(--font-display); }
 .tag-row{ display:flex; gap:6px; margin-top:16px; flex-wrap:wrap; }
 .kb-empty{ color:var(--text-dim); font-size:.88rem; padding:20px; }
 
+/* assignment picker (course scoping / user business-unit assignment) */
+.assignment-picker{ border:1px solid var(--border-soft); border-radius:var(--radius); padding:10px; max-height:280px; overflow-y:auto; }
+.assignment-row{ display:flex; align-items:center; gap:8px; padding:6px 8px; font-size:.86rem; cursor:pointer; }
+.assignment-row input{ margin:0; }
+.assignment-blocks{ margin-left:22px; }
+.assignment-row-sub{ font-size:.8rem; color:var(--text-dim); }
+
 /* exams */
 .exam-row{ display:flex; align-items:center; gap:16px; padding:18px; border-radius:12px; margin-bottom:10px; flex-wrap:wrap; }
 .exam-ic{ width:42px; height:42px; border-radius:11px; display:flex; align-items:center; justify-content:center; flex:none; font-size:1.2rem; }

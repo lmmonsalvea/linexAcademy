@@ -1,19 +1,34 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
+import AssignmentPicker from '../components/AssignmentPicker'
 import { apiFetch, apiFetchBlob } from '../utils/api'
+import { useAuth } from '../utils/auth'
 
 const MODULE_ICON = { video: '▶', pdf: '📄', scorm: '🧩', quiz: '📝' }
 const MODULE_LABEL = { video: 'Vídeo', pdf: 'PDF · lectura', scorm: 'Paquete SCORM', quiz: 'Quiz' }
+const canEditCourse = (role) => ['instructor', 'admin_area', 'superadmin'].includes(role)
+const emptyModule = () => ({ type: 'video', title: '', url: '' })
 
 export default function CourseDetail(){
   const { id } = useParams()
   const navigate = useNavigate()
+  const { profile } = useAuth()
 
   const [course, setCourse] = useState(null)
   const [error, setError] = useState('')
   const [enrolling, setEnrolling] = useState(false)
   const [downloading, setDownloading] = useState(false)
+
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editArea, setEditArea] = useState('')
+  const [editModules, setEditModules] = useState([])
+  const [editAreaIds, setEditAreaIds] = useState([])
+  const [editBlocks, setEditBlocks] = useState([])
+  const [updateNote, setUpdateNote] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const load = useCallback(() => {
     apiFetch(`/api/courses/${id}`)
@@ -22,6 +37,44 @@ export default function CourseDetail(){
   }, [id])
 
   useEffect(() => { load() }, [load])
+
+  const openEdit = () => {
+    setEditTitle(course.title)
+    setEditDescription(course.description || '')
+    setEditArea(course.area || '')
+    setEditModules(course.modules.map(m => ({ ...m })))
+    setEditAreaIds(course.assignedAreaIds || [])
+    setEditBlocks(course.assignedBlocks || [])
+    setUpdateNote('')
+    setEditing(true)
+  }
+
+  const updateEditModule = (i, field, value) => {
+    setEditModules(editModules.map((m, idx) => idx === i ? { ...m, [field]: value } : m))
+  }
+
+  const saveEdit = async (asAnnouncement) => {
+    setSaving(true)
+    setError('')
+    try {
+      const payload = {
+        title: editTitle,
+        description: editDescription,
+        area: editArea || null,
+        modules: editModules.filter(m => m.title.trim()),
+        assignedAreaIds: editAreaIds,
+        assignedBlocks: editBlocks,
+      }
+      if (asAnnouncement) payload.updateNote = updateNote
+      await apiFetch(`/api/courses/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+      setEditing(false)
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const enroll = async () => {
     setEnrolling(true)
@@ -72,13 +125,23 @@ export default function CourseDetail(){
       <button className="btn-text" onClick={() => navigate('/courses')}>← Volver al catálogo</button>
 
       <div className="course-hero" style={{ background: 'linear-gradient(120deg,#5B5CFF,#6D28D9 60%,#17153B)', marginTop: 14 }}>
-        <h2>{course.title}</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <h2>{course.title}</h2>
+          {canEditCourse(profile?.role) && (
+            <button className="btn btn-ghost btn-sm" onClick={openEdit}>Editar curso</button>
+          )}
+        </div>
         {course.description && <p>{course.description}</p>}
         <div className="meta">
           <span>🎬 {course.modules.length} módulos</span>
           {course.area && <span>🏷 {course.area}</span>}
           {course.instructorEmail && <span>👤 {course.instructorEmail}</span>}
         </div>
+        {course.updatedAt && (
+          <div className="pill pill-accent" style={{ marginTop: 10 }} title={course.updateNote || ''}>
+            🔄 Actualizado el {new Date(course.updatedAt).toLocaleDateString('es-CO')}
+          </div>
+        )}
         {!isEnrolled && (
           <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={enroll} disabled={enrolling}>
             {enrolling ? 'Inscribiendo…' : 'Inscribirme'}
@@ -87,6 +150,70 @@ export default function CourseDetail(){
       </div>
 
       {error && <div className="info-note" style={{ margin: '16px 0' }}><span>{error}</span></div>}
+      {course.updateNote && (
+        <div className="info-note" style={{ margin: '16px 0' }}>
+          <span>Última actualización: {course.updateNote}</span>
+        </div>
+      )}
+
+      {editing && (
+        <div className="card" style={{ padding: 20, margin: '16px 0' }}>
+          <div className="section-title">Editar curso</div>
+          <div className="field"><label>Título</label><input value={editTitle} onChange={e => setEditTitle(e.target.value)} /></div>
+          <div className="field"><label>Descripción</label><input value={editDescription} onChange={e => setEditDescription(e.target.value)} /></div>
+          <div className="field"><label>Área</label><input value={editArea} onChange={e => setEditArea(e.target.value)} /></div>
+
+          <div className="section-title" style={{ marginTop: 16 }}>¿Para quién es este curso?</div>
+          <p style={{ color: 'var(--text-dim)', fontSize: '.82rem', margin: '4px 0 10px' }}>
+            Sin nada seleccionado, queda abierto a todos.
+          </p>
+          <AssignmentPicker
+            assignedAreaIds={editAreaIds}
+            assignedBlocks={editBlocks}
+            onChange={({ assignedAreaIds, assignedBlocks }) => { setEditAreaIds(assignedAreaIds); setEditBlocks(assignedBlocks) }}
+          />
+
+          <div className="section-title" style={{ marginTop: 16 }}>Módulos</div>
+          {editModules.map((m, i) => (
+            <div key={i} className="card" style={{ padding: 14, marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div className="field">
+                <label>Tipo</label>
+                <select value={m.type} onChange={e => updateEditModule(i, 'type', e.target.value)}>
+                  <option value="video">Vídeo</option>
+                  <option value="pdf">PDF</option>
+                  <option value="scorm">SCORM</option>
+                  <option value="quiz">Quiz</option>
+                </select>
+              </div>
+              <div className="field"><label>Título del módulo</label><input value={m.title} onChange={e => updateEditModule(i, 'title', e.target.value)} /></div>
+              {m.type !== 'quiz' && (
+                <div className="field"><label>URL</label><input value={m.url || ''} onChange={e => updateEditModule(i, 'url', e.target.value)} /></div>
+              )}
+            </div>
+          ))}
+          <button type="button" className="btn btn-ghost btn-sm" style={{ marginBottom: 16 }} onClick={() => setEditModules([...editModules, emptyModule()])}>+ Agregar módulo</button>
+
+          <div className="section-title">Anunciar actualización (opcional)</div>
+          <p style={{ color: 'var(--text-dim)', fontSize: '.82rem', margin: '4px 0 10px' }}>
+            Si escribes una nota, se marca el curso como actualizado y se envía un correo a quienes correspondan (inscritos, y quienes estén en la unidad/bloque asignado).
+          </p>
+          <textarea
+            placeholder="ej. Se actualizó el módulo de seguridad con la nueva política"
+            value={updateNote}
+            onChange={e => setUpdateNote(e.target.value)}
+            rows={3}
+            style={{ display: 'block', width: '100%', marginBottom: 12 }}
+          />
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)} disabled={saving}>Cancelar</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => saveEdit(false)} disabled={saving}>Guardar sin notificar</button>
+            <button className="btn btn-primary btn-sm" onClick={() => saveEdit(true)} disabled={saving || !updateNote.trim()}>
+              {saving ? 'Guardando…' : 'Guardar y notificar actualización'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="detail-grid">
         <div>

@@ -83,6 +83,16 @@ router.get('/areas/:id/documents', asyncRoute(async (req, res) => {
   res.json({ documents });
 }));
 
+// GET /api/knowledge/areas/:id/blocks — any authenticated user. Lightweight
+// list of the distinct block names in an area, used to populate course
+// assignment pickers (NewCourse/CourseDetail) and the admin user-assignment
+// picker, without fetching every document's content.
+router.get('/areas/:id/blocks', asyncRoute(async (req, res) => {
+  const snap = await db.collection('knowledgeDocuments').where('areaId', '==', req.params.id).get();
+  const blocks = Array.from(new Set(snap.docs.map((d) => d.data().block || d.data().title)));
+  res.json({ blocks });
+}));
+
 // POST /api/knowledge/areas/:id/documents — content managers only. Documents
 // are published directly on write (no draft/review state machine — the old
 // prototype never implemented one and roles_permisos.md only describes it

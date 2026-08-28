@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
+import AssignmentPicker from '../components/AssignmentPicker'
 import { apiFetch } from '../utils/api'
 
 const emptyModule = () => ({ type: 'video', title: '', url: '' })
@@ -11,6 +12,8 @@ export default function NewCourse(){
   const [description, setDescription] = useState('')
   const [area, setArea] = useState('')
   const [modules, setModules] = useState([emptyModule()])
+  const [assignedAreaIds, setAssignedAreaIds] = useState([])
+  const [assignedBlocks, setAssignedBlocks] = useState([])
   const [msg, setMsg] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -26,7 +29,9 @@ export default function NewCourse(){
       title,
       description,
       area: area || null,
-      modules: modules.filter(m => m.title.trim())
+      modules: modules.filter(m => m.title.trim()),
+      assignedAreaIds,
+      assignedBlocks
     }
     try {
       const { id } = await apiFetch('/api/courses', {
@@ -51,7 +56,17 @@ export default function NewCourse(){
         <div className="field"><label>Descripción</label><input value={description} onChange={e => setDescription(e.target.value)} /></div>
         <div className="field"><label>Área</label><input value={area} onChange={e => setArea(e.target.value)} placeholder="ej. Tecnología" /></div>
 
-        <div className="section-title" style={{ marginTop: 8 }}>Módulos</div>
+        <div className="section-title" style={{ marginTop: 8 }}>¿Para quién es este curso?</div>
+        <p style={{ color: 'var(--text-dim)', fontSize: '.82rem', margin: '4px 0 10px' }}>
+          Sin nada seleccionado, el curso queda abierto a todos. Selecciona una o varias unidades de negocio y, opcionalmente, bloques dentro de ellas, para limitarlo.
+        </p>
+        <AssignmentPicker
+          assignedAreaIds={assignedAreaIds}
+          assignedBlocks={assignedBlocks}
+          onChange={({ assignedAreaIds, assignedBlocks }) => { setAssignedAreaIds(assignedAreaIds); setAssignedBlocks(assignedBlocks) }}
+        />
+
+        <div className="section-title" style={{ marginTop: 20 }}>Módulos</div>
         {modules.map((m, i) => (
           <div key={i} className="card" style={{ padding: 16, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div className="field">

@@ -82,7 +82,7 @@ export default function Courses(){
                 {c.area && <span className="tag">{c.area}</span>}
               </div>
               <div className="course-body">
-                <h3>{c.title}</h3>
+                <h3>{c.title} {c.updatedAt && <span className="pill pill-accent" style={{ fontSize: '.66rem' }}>Actualizado</span>}</h3>
                 {c.description && <span className="course-meta"><span>{c.description}</span></span>}
                 <span className="course-meta"><span>🎬 {c.modules.length} módulo{c.modules.length === 1 ? '' : 's'}</span></span>
               </div>

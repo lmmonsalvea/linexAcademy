@@ -6,17 +6,25 @@ const { requireRole } = require('../middleware/auth');
 const { validate } = require('../lib/validate');
 const { asyncRoute } = require('../middleware/errorHandler');
 const { renderCertificate } = require('../lib/certificate');
+const { notifyCourseUpdate } = require('../lib/courseNotifications');
 
 const router = express.Router();
 
 const MODULE_TYPES = ['video', 'pdf', 'scorm', 'quiz'];
+const canManageCourses = requireRole('instructor', 'admin_area', 'superadmin');
 
 // Who may view someone else's progress/certificate — ported from
 // courses_service/index.js `canViewOtherProgress`.
 const canViewOthersProgress = (role) =>
   ['instructor', 'admin_area', 'admin_rrhh', 'superadmin'].includes(role);
 
+// Roles that manage/oversee the catalog and therefore see every course
+// regardless of business-unit/block assignment.
+const seesEverything = (role) =>
+  ['instructor', 'admin_area', 'admin_rrhh', 'knowledge_manager', 'superadmin'].includes(role);
+
 const moduleInputSchema = z.object({
+  id: z.string().optional(),
   type: z.enum(MODULE_TYPES),
   title: z.string().trim().min(1, 'El título del módulo es obligatorio'),
   url: z.string().trim().optional().nullable(),
@@ -27,6 +35,23 @@ const createCourseSchema = z.object({
   description: z.string().trim().optional(),
   area: z.string().trim().optional().nullable(),
   modules: z.array(moduleInputSchema).optional(),
+  // Which business units (knowledgeAreas ids) / blocks this course targets.
+  // Empty arrays mean "open to everyone" — see isVisibleTo().
+  assignedAreaIds: z.array(z.string()).optional(),
+  assignedBlocks: z.array(z.string()).optional(),
+});
+
+const updateCourseSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  description: z.string().trim().optional(),
+  area: z.string().trim().optional().nullable(),
+  modules: z.array(moduleInputSchema).optional(),
+  assignedAreaIds: z.array(z.string()).optional(),
+  assignedBlocks: z.array(z.string()).optional(),
+  // Providing a non-empty updateNote is what marks this as a real "update
+  // announcement": it stamps updatedAt/updateNote (shown as a badge) and
+  // triggers the notification email. Editing without one is a silent fix.
+  updateNote: z.string().trim().optional(),
 });
 
 const progressSchema = z.object({
@@ -35,7 +60,7 @@ const progressSchema = z.object({
 
 function buildModule(input, order) {
   return {
-    id: crypto.randomUUID(),
+    id: input.id || crypto.randomUUID(),
     type: input.type,
     title: input.title,
     url: input.url || null,
@@ -48,6 +73,19 @@ function computeProgress(modules, completedModules) {
   const completed = completedModules || [];
   const percent = total === 0 ? 0 : Math.round((completed.length / total) * 100);
   return { completedModules: completed, percent, totalModules: total };
+}
+
+// Course is visible to `user` if it's open to everyone (no assignment set),
+// the user's own business unit/block matches, or the user has a role that
+// manages/oversees the whole catalog regardless of assignment.
+function isVisibleTo(course, user) {
+  if (seesEverything(user.role)) return true;
+  const areaIds = course.assignedAreaIds || [];
+  const blocks = course.assignedBlocks || [];
+  if (areaIds.length === 0 && blocks.length === 0) return true;
+  if (areaIds.length && !areaIds.includes(user.areaId)) return false;
+  if (blocks.length && !blocks.includes(user.block)) return false;
+  return true;
 }
 
 const courseRef = (id) => db.collection('courses').doc(id);
@@ -66,11 +104,15 @@ function courseSummary(course) {
     description: course.description || '',
     area: course.area || null,
     modules: course.modules || [],
+    assignedAreaIds: course.assignedAreaIds || [],
+    assignedBlocks: course.assignedBlocks || [],
+    updatedAt: course.updatedAt || null,
+    updateNote: course.updateNote || null,
   };
 }
 
 // 1. Create a course.
-router.post('/', requireRole('instructor', 'admin_area', 'superadmin'), asyncRoute(async (req, res) => {
+router.post('/', canManageCourses, asyncRoute(async (req, res) => {
   const data = validate(createCourseSchema, req.body);
   const modules = (data.modules || []).map((m, i) => buildModule(m, i));
   const course = {
@@ -78,6 +120,10 @@ router.post('/', requireRole('instructor', 'admin_area', 'superadmin'), asyncRou
     description: data.description || '',
     area: data.area || null,
     modules,
+    assignedAreaIds: data.assignedAreaIds || [],
+    assignedBlocks: data.assignedBlocks || [],
+    updatedAt: null,
+    updateNote: null,
     instructorUid: req.user.uid,
     instructorEmail: req.user.email,
     createdAt: new Date().toISOString(),
@@ -105,7 +151,11 @@ router.get('/', asyncRoute(async (req, res) => {
     return res.json({ courses: results });
   }
 
-  const filtered = req.query.area ? courses.filter((c) => c.area === req.query.area) : courses;
+  // Not "my courses": only show what this user is actually allowed to take,
+  // per its business-unit/block assignment (roles that manage the catalog
+  // see everything — see isVisibleTo).
+  const visible = courses.filter((c) => isVisibleTo(c, req.user));
+  const filtered = req.query.area ? visible.filter((c) => c.area === req.query.area) : visible;
   const results = [];
   for (const course of filtered) {
     const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
@@ -118,7 +168,11 @@ router.get('/', asyncRoute(async (req, res) => {
 router.get('/:id', asyncRoute(async (req, res) => {
   const course = await getCourseOr404(req.params.id);
   const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
-  const completedModules = enrollSnap.exists ? enrollSnap.data().completedModules || [] : [];
+  const enrolled = enrollSnap.exists;
+  if (!isVisibleTo(course, req.user) && !enrolled) {
+    throw { status: 403, message: 'Este curso no está disponible para tu unidad de negocio o bloque' };
+  }
+  const completedModules = enrolled ? enrollSnap.data().completedModules || [] : [];
   res.json({
     ...courseSummary(course),
     instructorUid: course.instructorUid || null,
@@ -126,13 +180,46 @@ router.get('/:id', asyncRoute(async (req, res) => {
     // Not in the original spec's response shape, but CourseDetail.jsx needs
     // it to decide whether to show "Inscribirme" vs the progress UI — percent
     // alone can't distinguish "enrolled, 0% done" from "not enrolled".
-    enrolled: enrollSnap.exists,
+    enrolled,
     progress: computeProgress(course.modules, completedModules),
   });
 }));
 
-// 4. Append a module to an existing course.
-router.post('/:id/modules', requireRole('instructor', 'admin_area', 'superadmin'), asyncRoute(async (req, res) => {
+// 4. Edit a course. A non-empty `updateNote` marks it as a real "update
+// announcement" — stamps updatedAt/updateNote (surfaced as a badge) and
+// fires the notification email in the background (doesn't block the
+// response; failures are logged, never surfaced to the caller).
+router.patch('/:id', canManageCourses, asyncRoute(async (req, res) => {
+  const data = validate(updateCourseSchema, req.body);
+  const course = await getCourseOr404(req.params.id);
+
+  const patch = {};
+  if (data.title !== undefined) patch.title = data.title;
+  if (data.description !== undefined) patch.description = data.description;
+  if (data.area !== undefined) patch.area = data.area;
+  if (data.assignedAreaIds !== undefined) patch.assignedAreaIds = data.assignedAreaIds;
+  if (data.assignedBlocks !== undefined) patch.assignedBlocks = data.assignedBlocks;
+  if (data.modules !== undefined) {
+    patch.modules = data.modules.map((m, i) => buildModule(m, i));
+  }
+
+  const isAnnouncement = !!(data.updateNote && data.updateNote.trim());
+  if (isAnnouncement) {
+    patch.updatedAt = new Date().toISOString();
+    patch.updateNote = data.updateNote.trim();
+  }
+
+  await courseRef(course.id).update(patch);
+  const updated = await getCourseOr404(course.id);
+  res.json(courseSummary(updated));
+
+  if (isAnnouncement) {
+    notifyCourseUpdate(updated).catch((err) => console.error('notifyCourseUpdate failed:', err));
+  }
+}));
+
+// 5. Append a module to an existing course.
+router.post('/:id/modules', canManageCourses, asyncRoute(async (req, res) => {
   const data = validate(moduleInputSchema, req.body);
   const course = await getCourseOr404(req.params.id);
   const modules = course.modules || [];
@@ -141,7 +228,7 @@ router.post('/:id/modules', requireRole('instructor', 'admin_area', 'superadmin'
   res.json(newModule);
 }));
 
-// 5. Enroll — idempotent.
+// 6. Enroll — idempotent.
 router.post('/:id/enroll', asyncRoute(async (req, res) => {
   const course = await getCourseOr404(req.params.id);
   const ref = enrollmentRef(course.id, req.user.uid);
@@ -160,7 +247,7 @@ router.post('/:id/enroll', asyncRoute(async (req, res) => {
   res.json(enrollment);
 }));
 
-// 6. Mark a module completed — auto-enrolls if needed (forgiving behavior
+// 7. Mark a module completed — auto-enrolls if needed (forgiving behavior
 // ported from the old prototype's upsert).
 router.post('/:id/progress', asyncRoute(async (req, res) => {
   const { moduleId } = validate(progressSchema, req.body);
@@ -194,7 +281,7 @@ router.post('/:id/progress', asyncRoute(async (req, res) => {
   res.json(computeProgress(modules, completedModules));
 }));
 
-// 7. View a specific user's progress.
+// 8. View a specific user's progress.
 router.get('/:id/progress/:uid', asyncRoute(async (req, res) => {
   const targetUid = req.params.uid;
   if (targetUid !== req.user.uid && !canViewOthersProgress(req.user.role)) {
@@ -206,7 +293,7 @@ router.get('/:id/progress/:uid', asyncRoute(async (req, res) => {
   res.json(computeProgress(course.modules, completedModules));
 }));
 
-// 8. Certificate — only once fully completed.
+// 9. Certificate — only once fully completed.
 router.get('/:id/certificate', asyncRoute(async (req, res) => {
   const targetUid = req.query.uid || req.user.uid;
   if (targetUid !== req.user.uid && !canViewOthersProgress(req.user.role)) {
