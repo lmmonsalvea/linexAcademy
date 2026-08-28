@@ -5,8 +5,8 @@ import AssignmentPicker from '../components/AssignmentPicker'
 import { apiFetch, apiFetchBlob } from '../utils/api'
 import { useAuth } from '../utils/auth'
 
-const MODULE_ICON = { video: '▶', pdf: '📄', scorm: '🧩', quiz: '📝' }
-const MODULE_LABEL = { video: 'Vídeo', pdf: 'PDF · lectura', scorm: 'Paquete SCORM', quiz: 'Quiz' }
+const MODULE_ICON = { video: '▶', pdf: '📄', scorm: '🧩', quiz: '📝', link: '🔗' }
+const MODULE_LABEL = { video: 'Vídeo', pdf: 'PDF · lectura', scorm: 'Paquete SCORM', quiz: 'Quiz', link: 'Enlace externo' }
 const canEditCourse = (role) => ['instructor', 'admin_area', 'superadmin'].includes(role)
 const emptyModule = () => ({ type: 'video', title: '', url: '' })
 
@@ -183,6 +183,7 @@ export default function CourseDetail(){
                   <option value="pdf">PDF</option>
                   <option value="scorm">SCORM</option>
                   <option value="quiz">Quiz</option>
+                  <option value="link">Enlace externo</option>
                 </select>
               </div>
               <div className="field"><label>Título del módulo</label><input value={m.title} onChange={e => updateEditModule(i, 'title', e.target.value)} /></div>
@@ -242,6 +243,9 @@ export default function CourseDetail(){
               )}
               {m.type === 'quiz' && (
                 <button className="btn btn-primary btn-sm" onClick={() => navigate('/exams')}>Ir a la evaluación</button>
+              )}
+              {m.type === 'link' && m.url && (
+                <a href={m.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">Abrir enlace</a>
               )}
 
               {isDone(m) ? (

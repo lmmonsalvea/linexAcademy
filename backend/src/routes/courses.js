@@ -10,7 +10,7 @@ const { notifyCourseUpdate } = require('../lib/courseNotifications');
 
 const router = express.Router();
 
-const MODULE_TYPES = ['video', 'pdf', 'scorm', 'quiz'];
+const MODULE_TYPES = ['video', 'pdf', 'scorm', 'quiz', 'link'];
 const canManageCourses = requireRole('instructor', 'admin_area', 'superadmin');
 
 // Who may view someone else's progress/certificate — ported from

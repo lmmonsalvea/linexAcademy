@@ -1,6 +1,6 @@
 const express = require('express');
 const { z } = require('zod');
-const { db } = require('../firebaseAdmin');
+const { db, auth } = require('../firebaseAdmin');
 const { requireRole, ROLES } = require('../middleware/auth');
 const { validate } = require('../lib/validate');
 const { asyncRoute } = require('../middleware/errorHandler');
@@ -49,6 +49,44 @@ router.patch('/:uid/assignment', requireRole('superadmin'), asyncRoute(async (re
   if (block !== undefined) patch.block = block;
   await ref.update(patch);
   res.json({ uid: req.params.uid, ...patch });
+}));
+
+const statusSchema = z.object({ disabled: z.boolean() });
+
+// Inactivar/reactivar: blocks sign-in in Firebase Auth (disabled accounts
+// fail verifyIdToken's checkRevoked check, see middleware/auth.js) without
+// losing their data — unlike delete, this is reversible.
+router.patch('/:uid/status', requireRole('superadmin'), asyncRoute(async (req, res) => {
+  if (req.params.uid === req.user.uid) {
+    throw { status: 400, message: 'No puedes inactivar tu propia cuenta' };
+  }
+  const { disabled } = validate(statusSchema, req.body);
+  const ref = db.collection('users').doc(req.params.uid);
+  const snap = await ref.get();
+  if (!snap.exists) throw { status: 404, message: 'Usuario no encontrado' };
+
+  await auth.updateUser(req.params.uid, { disabled });
+  await ref.update({ disabled });
+  res.json({ uid: req.params.uid, disabled });
+}));
+
+// Permanent delete — removes both the Firebase Auth account (so they can't
+// sign back in and auto-reprovision) and this app's own record.
+router.delete('/:uid', requireRole('superadmin'), asyncRoute(async (req, res) => {
+  if (req.params.uid === req.user.uid) {
+    throw { status: 400, message: 'No puedes eliminar tu propia cuenta' };
+  }
+  const ref = db.collection('users').doc(req.params.uid);
+  const snap = await ref.get();
+  if (!snap.exists) throw { status: 404, message: 'Usuario no encontrado' };
+
+  await auth.deleteUser(req.params.uid).catch((err) => {
+    // Already gone from Firebase Auth (e.g. deleted directly in console
+    // before) shouldn't block cleaning up our own leftover record.
+    if (err.code !== 'auth/user-not-found') throw err;
+  });
+  await ref.delete();
+  res.json({ uid: req.params.uid, deleted: true });
 }));
 
 module.exports = router;

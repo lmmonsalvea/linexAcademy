@@ -76,6 +76,7 @@ export default function NewCourse(){
                 <option value="pdf">PDF</option>
                 <option value="scorm">SCORM</option>
                 <option value="quiz">Quiz</option>
+                <option value="link">Enlace externo</option>
               </select>
             </div>
             <div className="field"><label>Título del módulo</label><input value={m.title} onChange={e => updateModule(i, 'title', e.target.value)} /></div>

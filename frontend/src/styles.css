@@ -244,7 +244,7 @@ input, select, textarea{ font-family:var(--font-display); }
 /* course detail */
 .course-hero{ border-radius:var(--radius); padding:28px 30px; color:#fff; position:relative; overflow:hidden; margin-bottom:24px; }
 .course-hero h2{ color:#fff; font-size:1.6rem; margin-bottom:8px; }
-.course-hero p{ color:rgba(255,255,255,.82); max-width:560px; line-height:1.5; margin-bottom:16px; }
+.course-hero p{ color:rgba(255,255,255,.82); max-width:560px; line-height:1.5; margin-bottom:16px; white-space:pre-line; }
 .course-hero .meta{ display:flex; gap:18px; font-size:.82rem; color:rgba(255,255,255,.85); flex-wrap:wrap; }
 .detail-grid{ display:grid; grid-template-columns:1.6fr 1fr; gap:22px; }
 .module-row{ display:flex; gap:14px; align-items:center; padding:16px; border-radius:12px; margin-bottom:10px; flex-wrap:wrap; }

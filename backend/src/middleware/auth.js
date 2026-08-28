@@ -25,7 +25,9 @@ async function verifyToken(req, res, next) {
       return next({ status: 401, message: 'Falta el token de autenticación' });
     }
 
-    const decoded = await auth.verifyIdToken(match[1]);
+    // checkRevoked=true so a superadmin disabling someone takes effect
+    // immediately, not just after their existing ID token naturally expires.
+    const decoded = await auth.verifyIdToken(match[1], true);
     const email = decoded.email;
 
     if (!email || !decoded.email_verified) {
@@ -51,10 +53,17 @@ async function verifyToken(req, res, next) {
       await userRef.set(userData);
     }
 
+    if (userData.disabled) {
+      return next({ status: 403, message: 'Tu cuenta ha sido inactivada. Contacta a un administrador.' });
+    }
+
     req.user = { uid: decoded.uid, ...userData };
     next();
   } catch (err) {
-    next({ status: 401, message: 'Token inválido o expirado', cause: err });
+    const message = err.code === 'auth/user-disabled'
+      ? 'Tu cuenta ha sido inactivada. Contacta a un administrador.'
+      : 'Token inválido o expirado';
+    next({ status: 401, message, cause: err });
   }
 }
 

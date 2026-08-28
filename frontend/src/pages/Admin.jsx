@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import AppShell from '../components/AppShell'
 import AssignmentPicker from '../components/AssignmentPicker'
 import { apiFetch } from '../utils/api'
+import { useAuth } from '../utils/auth'
 
 const ROLES = ['empleado', 'instructor', 'admin_area', 'admin_rrhh', 'knowledge_manager', 'superadmin']
 const ROLE_LABELS = {
@@ -14,6 +15,7 @@ const ROLE_LABELS = {
 }
 
 export default function Admin() {
+  const { profile } = useAuth()
   const [users, setUsers] = useState(null)
   const [areas, setAreas] = useState([])
   const [error, setError] = useState('')
@@ -65,6 +67,32 @@ export default function Admin() {
     }
   }
 
+  const toggleStatus = async (u) => {
+    setSavingUid(u.uid)
+    try {
+      const disabled = !u.disabled
+      await apiFetch(`/api/users/${u.uid}/status`, { method: 'PATCH', body: JSON.stringify({ disabled }) })
+      setUsers((prev) => prev.map((x) => (x.uid === u.uid ? { ...x, disabled } : x)))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingUid(null)
+    }
+  }
+
+  const removeUser = async (u) => {
+    if (!window.confirm(`¿Eliminar definitivamente a ${u.email}? Esta acción no se puede deshacer.`)) return
+    setSavingUid(u.uid)
+    try {
+      await apiFetch(`/api/users/${u.uid}`, { method: 'DELETE' })
+      setUsers((prev) => prev.filter((x) => x.uid !== u.uid))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingUid(null)
+    }
+  }
+
   return (
     <AppShell active="admin">
       <div className="panel-head"><h2>Administración de usuarios</h2></div>
@@ -75,11 +103,13 @@ export default function Admin() {
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <table className="table">
           <thead>
-            <tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>Unidad / Bloque</th><th></th></tr>
+            <tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>Unidad / Bloque</th><th>Estado</th><th></th></tr>
           </thead>
           <tbody>
-            {users === null && <tr><td colSpan={5}>Cargando…</td></tr>}
-            {users?.map((u) => (
+            {users === null && <tr><td colSpan={6}>Cargando…</td></tr>}
+            {users?.map((u) => {
+              const isSelf = u.uid === profile?.uid
+              return (
               <React.Fragment key={u.uid}>
                 <tr>
                   <td>{u.email}</td>
@@ -97,14 +127,36 @@ export default function Admin() {
                     {u.areaId ? `${areaName(u.areaId) || u.areaId}${u.block ? ` · ${u.block}` : ''}` : 'Sin asignar'}
                   </td>
                   <td>
+                    {u.disabled
+                      ? <span className="pill pill-locked">Inactivo</span>
+                      : <span className="pill pill-success">Activo</span>}
+                  </td>
+                  <td style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <button className="btn-text" onClick={() => openAssignment(u)}>
                       {assigningUid === u.uid ? 'Cerrar' : 'Asignar'}
+                    </button>
+                    <button
+                      className="btn-text"
+                      disabled={isSelf || savingUid === u.uid}
+                      title={isSelf ? 'No puedes inactivar tu propia cuenta' : ''}
+                      onClick={() => toggleStatus(u)}
+                    >
+                      {u.disabled ? 'Activar' : 'Inactivar'}
+                    </button>
+                    <button
+                      className="btn-text"
+                      style={{ color: 'var(--danger, #C0392B)' }}
+                      disabled={isSelf || savingUid === u.uid}
+                      title={isSelf ? 'No puedes eliminar tu propia cuenta' : ''}
+                      onClick={() => removeUser(u)}
+                    >
+                      Eliminar
                     </button>
                   </td>
                 </tr>
                 {assigningUid === u.uid && (
                   <tr>
-                    <td colSpan={5} style={{ background: 'var(--surface-2)' }}>
+                    <td colSpan={6} style={{ background: 'var(--surface-2)' }}>
                       <div style={{ padding: 14, maxWidth: 420 }}>
                         <AssignmentPicker
                           single
@@ -125,7 +177,7 @@ export default function Admin() {
                   </tr>
                 )}
               </React.Fragment>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>
