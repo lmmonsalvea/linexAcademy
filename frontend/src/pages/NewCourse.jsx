@@ -14,6 +14,8 @@ export default function NewCourse(){
   const [modules, setModules] = useState([emptyModule()])
   const [assignedAreaIds, setAssignedAreaIds] = useState([])
   const [assignedBlocks, setAssignedBlocks] = useState([])
+  const [assignedTeamIds, setAssignedTeamIds] = useState([])
+  const [order, setOrder] = useState('')
   const [msg, setMsg] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -31,7 +33,9 @@ export default function NewCourse(){
       area: area || null,
       modules: modules.filter(m => m.title.trim()),
       assignedAreaIds,
-      assignedBlocks
+      assignedBlocks,
+      assignedTeamIds,
+      order: order.trim() === '' ? undefined : Number(order)
     }
     try {
       const { id } = await apiFetch('/api/courses', {
@@ -55,15 +59,19 @@ export default function NewCourse(){
         <div className="field"><label>Título</label><input value={title} onChange={e => setTitle(e.target.value)} required /></div>
         <div className="field"><label>Descripción</label><input value={description} onChange={e => setDescription(e.target.value)} /></div>
         <div className="field"><label>Área</label><input value={area} onChange={e => setArea(e.target.value)} placeholder="ej. Tecnología" /></div>
+        <div className="field"><label>Orden en el catálogo (opcional)</label><input type="number" value={order} onChange={e => setOrder(e.target.value)} placeholder="ej. 1" /></div>
 
         <div className="section-title" style={{ marginTop: 8 }}>¿Para quién es este curso?</div>
         <p style={{ color: 'var(--text-dim)', fontSize: '.82rem', margin: '4px 0 10px' }}>
-          Sin nada seleccionado, el curso queda abierto a todos. Selecciona una o varias unidades de negocio y, opcionalmente, bloques dentro de ellas, para limitarlo.
+          Sin nada seleccionado, el curso queda abierto a todos. Puedes limitarlo a una unidad de negocio completa, a un bloque específico, o a un equipo de trabajo puntual — cada nivel es independiente.
         </p>
         <AssignmentPicker
           assignedAreaIds={assignedAreaIds}
           assignedBlocks={assignedBlocks}
-          onChange={({ assignedAreaIds, assignedBlocks }) => { setAssignedAreaIds(assignedAreaIds); setAssignedBlocks(assignedBlocks) }}
+          assignedTeamIds={assignedTeamIds}
+          onChange={({ assignedAreaIds, assignedBlocks, assignedTeamIds }) => {
+            setAssignedAreaIds(assignedAreaIds); setAssignedBlocks(assignedBlocks); setAssignedTeamIds(assignedTeamIds)
+          }}
         />
 
         <div className="section-title" style={{ marginTop: 20 }}>Módulos</div>

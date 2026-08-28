@@ -1,18 +1,23 @@
 const { db } = require('../firebaseAdmin');
 
-// A course with no assignment is open to the whole company (the transversal
-// path); otherwise a user matches if their own business unit/block is in
-// the course's assigned lists. This is the enrollment-eligibility test —
-// deliberately role-blind (unlike courses.js's `seesEverything`, which is
-// about catalog *visibility* for people managing the courses, not about who
-// the course is actually for).
+// A course with no assignment at all is open to the whole company (the
+// transversal path). Otherwise, each of the three targeting levels is
+// independently sufficient — assigning to an area means "everyone in that
+// area", assigning to a block narrows it to that block, assigning to a
+// specific team narrows it further to just that team. They're alternative
+// scopes, not stacked filters: matching ANY one of them qualifies. This is
+// the enrollment-eligibility test — deliberately role-blind (unlike
+// courses.js's `seesEverything`, which is about catalog *visibility* for
+// people managing the courses, not about who the course is actually for).
 function matchesAssignment(course, user) {
   const areaIds = course.assignedAreaIds || [];
   const blocks = course.assignedBlocks || [];
-  if (areaIds.length === 0 && blocks.length === 0) return true;
-  if (areaIds.length && !areaIds.includes(user.areaId)) return false;
-  if (blocks.length && !blocks.includes(user.block)) return false;
-  return true;
+  const teamIds = course.assignedTeamIds || [];
+  if (areaIds.length === 0 && blocks.length === 0 && teamIds.length === 0) return true;
+  if (areaIds.length && areaIds.includes(user.areaId)) return true;
+  if (blocks.length && blocks.includes(user.block)) return true;
+  if (teamIds.length && teamIds.includes(user.team)) return true;
+  return false;
 }
 
 async function ensureEnrollment(courseId, user) {

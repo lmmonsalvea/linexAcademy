@@ -27,6 +27,8 @@ export default function CourseDetail(){
   const [editModules, setEditModules] = useState([])
   const [editAreaIds, setEditAreaIds] = useState([])
   const [editBlocks, setEditBlocks] = useState([])
+  const [editTeamIds, setEditTeamIds] = useState([])
+  const [editOrder, setEditOrder] = useState('')
   const [updateNote, setUpdateNote] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -56,6 +58,8 @@ export default function CourseDetail(){
     setEditModules(course.modules.map(m => ({ ...m })))
     setEditAreaIds(course.assignedAreaIds || [])
     setEditBlocks(course.assignedBlocks || [])
+    setEditTeamIds(course.assignedTeamIds || [])
+    setEditOrder(course.order ?? '')
     setUpdateNote('')
     setEditing(true)
   }
@@ -75,6 +79,8 @@ export default function CourseDetail(){
         modules: editModules.filter(m => m.title.trim()),
         assignedAreaIds: editAreaIds,
         assignedBlocks: editBlocks,
+        assignedTeamIds: editTeamIds,
+        order: editOrder === '' ? undefined : Number(editOrder),
       }
       if (asAnnouncement) payload.updateNote = updateNote
       await apiFetch(`/api/courses/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
@@ -156,15 +162,19 @@ export default function CourseDetail(){
           <div className="field"><label>Título</label><input value={editTitle} onChange={e => setEditTitle(e.target.value)} /></div>
           <div className="field"><label>Descripción</label><input value={editDescription} onChange={e => setEditDescription(e.target.value)} /></div>
           <div className="field"><label>Área</label><input value={editArea} onChange={e => setEditArea(e.target.value)} /></div>
+          <div className="field"><label>Orden en el catálogo</label><input type="number" value={editOrder} onChange={e => setEditOrder(e.target.value)} /></div>
 
           <div className="section-title" style={{ marginTop: 16 }}>¿Para quién es este curso?</div>
           <p style={{ color: 'var(--text-dim)', fontSize: '.82rem', margin: '4px 0 10px' }}>
-            Sin nada seleccionado, queda abierto a todos. Al guardar, se asigna automáticamente a las personas de la unidad/bloque elegidos — no tienen que inscribirse.
+            Sin nada seleccionado, queda abierto a todos. Al guardar, se asigna automáticamente a las personas de la unidad, bloque o equipo elegidos — no tienen que inscribirse. Cada nivel es independiente: si eliges una unidad, aplica a todos los que están en ella; si eliges un bloque, solo a ese bloque; si eliges un equipo, solo a ese equipo.
           </p>
           <AssignmentPicker
             assignedAreaIds={editAreaIds}
             assignedBlocks={editBlocks}
-            onChange={({ assignedAreaIds, assignedBlocks }) => { setEditAreaIds(assignedAreaIds); setEditBlocks(assignedBlocks) }}
+            assignedTeamIds={editTeamIds}
+            onChange={({ assignedAreaIds, assignedBlocks, assignedTeamIds }) => {
+              setEditAreaIds(assignedAreaIds); setEditBlocks(assignedBlocks); setEditTeamIds(assignedTeamIds)
+            }}
           />
 
           <div className="section-title" style={{ marginTop: 16 }}>Módulos</div>

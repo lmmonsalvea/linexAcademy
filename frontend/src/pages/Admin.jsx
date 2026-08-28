@@ -12,6 +12,9 @@ const ROLE_LABELS = {
   superadmin: 'Superadmin',
 }
 
+const POSITION_TITLES = ['lead', 'manager', 'vp', 'svp']
+const POSITION_LABELS = { lead: 'Lead', manager: 'Manager', vp: 'Vicepresidente (VP)', svp: 'SVP' }
+
 export default function Admin() {
   const { profile } = useAuth()
   const [users, setUsers] = useState(null)
@@ -19,7 +22,8 @@ export default function Admin() {
   const [error, setError] = useState('')
   const [savingUid, setSavingUid] = useState(null)
   const [assigningUid, setAssigningUid] = useState(null)
-  const [draftAssignment, setDraftAssignment] = useState({ assignedAreaIds: [], assignedBlocks: [] })
+  const [draftAssignment, setDraftAssignment] = useState({ assignedAreaIds: [], assignedBlocks: [], assignedTeamIds: [] })
+  const [draftPositionTitle, setDraftPositionTitle] = useState('')
 
   const load = () => {
     apiFetch('/api/users').then((r) => setUsers(r.users)).catch((err) => setError(err.message))
@@ -47,7 +51,9 @@ export default function Admin() {
     setDraftAssignment({
       assignedAreaIds: u.areaId ? [u.areaId] : [],
       assignedBlocks: u.block ? [u.block] : [],
+      assignedTeamIds: u.team ? [u.team] : [],
     })
+    setDraftPositionTitle(u.positionTitle || '')
   }
 
   const saveAssignment = async (uid) => {
@@ -55,8 +61,10 @@ export default function Admin() {
     try {
       const areaId = draftAssignment.assignedAreaIds[0] || null
       const block = draftAssignment.assignedBlocks[0] || null
-      await apiFetch(`/api/users/${uid}/assignment`, { method: 'PATCH', body: JSON.stringify({ areaId, block }) })
-      setUsers((prev) => prev.map((u) => (u.uid === uid ? { ...u, areaId, block } : u)))
+      const team = draftAssignment.assignedTeamIds[0] || null
+      const positionTitle = draftPositionTitle || null
+      await apiFetch(`/api/users/${uid}/assignment`, { method: 'PATCH', body: JSON.stringify({ areaId, block, team, positionTitle }) })
+      setUsers((prev) => prev.map((u) => (u.uid === uid ? { ...u, areaId, block, team, positionTitle } : u)))
       setAssigningUid(null)
     } catch (err) {
       setError(err.message)
@@ -122,7 +130,9 @@ export default function Admin() {
                     </select>
                   </td>
                   <td style={{ color: 'var(--text-dim)', fontSize: '.82rem' }}>
-                    {u.areaId ? `${areaName(u.areaId) || u.areaId}${u.block ? ` · ${u.block}` : ''}` : 'Sin asignar'}
+                    {u.areaId
+                      ? `${areaName(u.areaId) || u.areaId}${u.block ? ` · ${u.block}` : ''}${u.positionTitle ? ` · ${POSITION_LABELS[u.positionTitle] || u.positionTitle}` : ''}`
+                      : 'Sin asignar'}
                   </td>
                   <td>
                     {u.disabled
@@ -160,8 +170,16 @@ export default function Admin() {
                           single
                           assignedAreaIds={draftAssignment.assignedAreaIds}
                           assignedBlocks={draftAssignment.assignedBlocks}
+                          assignedTeamIds={draftAssignment.assignedTeamIds}
                           onChange={setDraftAssignment}
                         />
+                        <div className="field" style={{ marginTop: 10 }}>
+                          <label>Cargo (opcional — informativo, no cambia permisos)</label>
+                          <select value={draftPositionTitle} onChange={(e) => setDraftPositionTitle(e.target.value)}>
+                            <option value="">Sin especificar</option>
+                            {POSITION_TITLES.map((p) => <option key={p} value={p}>{POSITION_LABELS[p]}</option>)}
+                          </select>
+                        </div>
                         <button
                           className="btn btn-primary btn-sm"
                           style={{ marginTop: 10 }}

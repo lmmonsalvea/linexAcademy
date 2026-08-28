@@ -30,6 +30,22 @@ export default function Courses(){
     return () => { cancelled = true }
   }, [])
 
+  const isManager = canCreate(profile?.role)
+
+  const moveCourse = async (visibleList, index, direction) => {
+    const otherIndex = index + direction
+    if (otherIndex < 0 || otherIndex >= visibleList.length) return
+    const reordered = [...visibleList]
+    ;[reordered[index], reordered[otherIndex]] = [reordered[otherIndex], reordered[index]]
+    try {
+      await apiFetch('/api/courses/reorder', { method: 'PUT', body: JSON.stringify({ ids: reordered.map(c => c.id) }) })
+      const { courses: fresh } = await apiFetch('/api/courses')
+      setCourses(fresh)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   if (courses === null) {
     return <AppShell active="courses"><div className="page-loading">Cargando cursos…</div></AppShell>
   }
@@ -79,6 +95,12 @@ export default function Courses(){
               </div>
             </Link>
             <div className="course-card-footer">
+              {isManager && (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  <button className="btn btn-ghost btn-sm" disabled={i === 0} onClick={() => moveCourse(visible, i, -1)} title="Mover antes">↑</button>
+                  <button className="btn btn-ghost btn-sm" disabled={i === visible.length - 1} onClick={() => moveCourse(visible, i, 1)} title="Mover después">↓</button>
+                </div>
+              )}
               <Link to={`/courses/${c.id}`} className="btn btn-primary btn-sm btn-block">Ver curso</Link>
             </div>
           </div>

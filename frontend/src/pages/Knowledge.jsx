@@ -11,6 +11,7 @@ export default function Knowledge() {
   const [areas, setAreas] = useState([])
   const [selectedArea, setSelectedArea] = useState(null)
   const [documents, setDocuments] = useState([])
+  const [blocks, setBlocks] = useState([])
   const [selectedBlock, setSelectedBlock] = useState(null)
   const [selectedDoc, setSelectedDoc] = useState(null)
   const [query, setQuery] = useState('')
@@ -22,11 +23,15 @@ export default function Knowledge() {
   const [newAreaName, setNewAreaName] = useState('')
   const [newAreaDescription, setNewAreaDescription] = useState('')
 
+  const [showBlockForm, setShowBlockForm] = useState(false)
+  const [newBlockName, setNewBlockName] = useState('')
+
   const [showDocForm, setShowDocForm] = useState(false)
   const [newDocTitle, setNewDocTitle] = useState('')
   const [newDocBlock, setNewDocBlock] = useState('')
   const [newDocContent, setNewDocContent] = useState('')
   const [newDocTags, setNewDocTags] = useState('')
+  const [newDocVisibility, setNewDocVisibility] = useState('private')
 
   const [showVersionForm, setShowVersionForm] = useState(false)
   const [newVersionContent, setNewVersionContent] = useState('')
@@ -41,6 +46,7 @@ export default function Knowledge() {
   const [teamMetaTitle, setTeamMetaTitle] = useState('')
   const [teamMetaBlock, setTeamMetaBlock] = useState('')
   const [teamMetaAreaId, setTeamMetaAreaId] = useState('')
+  const [teamMetaVisibility, setTeamMetaVisibility] = useState('private')
 
   const [saving, setSaving] = useState(false)
 
@@ -61,6 +67,7 @@ export default function Knowledge() {
       // Clicking the already-expanded area again collapses it.
       setSelectedArea(null)
       setDocuments([])
+      setBlocks([])
       setSelectedBlock(null)
       setSelectedDoc(null)
       return
@@ -70,8 +77,15 @@ export default function Knowledge() {
     setSelectedDoc(null)
     setResults(null)
     setShowDocForm(false)
-    apiFetch(`/api/knowledge/areas/${area.id}/documents`)
-      .then(({ documents: docs }) => setDocuments(docs))
+    setShowBlockForm(false)
+    Promise.all([
+      apiFetch(`/api/knowledge/areas/${area.id}/documents`),
+      apiFetch(`/api/knowledge/areas/${area.id}/blocks`),
+    ])
+      .then(([docsRes, blocksRes]) => {
+        setDocuments(docsRes.documents)
+        setBlocks(blocksRes.blocks)
+      })
       .catch((err) => setError(err.message))
   }
 
@@ -110,7 +124,7 @@ export default function Knowledge() {
         method: 'POST',
         body: JSON.stringify({ name: newAreaName, description: newAreaDescription }),
       })
-      setAreas((prev) => [...prev, area].sort((a, b) => a.name.localeCompare(b.name)))
+      setAreas((prev) => [...prev, area])
       setNewAreaName('')
       setNewAreaDescription('')
       setShowAreaForm(false)
@@ -118,6 +132,51 @@ export default function Knowledge() {
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const moveArea = async (index, direction) => {
+    const otherIndex = index + direction
+    if (otherIndex < 0 || otherIndex >= areas.length) return
+    const reordered = [...areas]
+    ;[reordered[index], reordered[otherIndex]] = [reordered[otherIndex], reordered[index]]
+    setAreas(reordered)
+    try {
+      await apiFetch('/api/knowledge/areas/reorder', { method: 'PUT', body: JSON.stringify({ ids: reordered.map((a) => a.id) }) })
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const createBlock = async (e) => {
+    e.preventDefault()
+    if (!selectedArea || !newBlockName.trim()) return
+    setSaving(true)
+    try {
+      await apiFetch(`/api/knowledge/areas/${selectedArea.id}/blocks`, {
+        method: 'POST',
+        body: JSON.stringify({ name: newBlockName.trim() }),
+      })
+      setBlocks((prev) => [...prev, newBlockName.trim()])
+      setNewBlockName('')
+      setShowBlockForm(false)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const moveBlock = async (index, direction) => {
+    const otherIndex = index + direction
+    if (otherIndex < 0 || otherIndex >= blocks.length) return
+    const reordered = [...blocks]
+    ;[reordered[index], reordered[otherIndex]] = [reordered[otherIndex], reordered[index]]
+    setBlocks(reordered)
+    try {
+      await apiFetch(`/api/knowledge/areas/${selectedArea.id}/blocks/reorder`, { method: 'PUT', body: JSON.stringify({ names: reordered }) })
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -129,20 +188,40 @@ export default function Knowledge() {
       const tags = newDocTags.split(',').map((t) => t.trim()).filter(Boolean)
       const doc = await apiFetch(`/api/knowledge/areas/${selectedArea.id}/documents`, {
         method: 'POST',
-        body: JSON.stringify({ title: newDocTitle, content: newDocContent, tags, block: newDocBlock || undefined }),
+        body: JSON.stringify({ title: newDocTitle, content: newDocContent, tags, block: newDocBlock || undefined, visibility: newDocVisibility }),
       })
       setDocuments((prev) => [...prev, doc])
-      setSelectedBlock(doc.block || doc.title)
+      const finalBlock = doc.block || doc.title
+      setBlocks((prev) => (prev.includes(finalBlock) ? prev : [...prev, finalBlock]))
+      setSelectedBlock(finalBlock)
       setSelectedDoc(doc)
       setNewDocTitle('')
       setNewDocBlock('')
       setNewDocContent('')
       setNewDocTags('')
+      setNewDocVisibility('private')
       setShowDocForm(false)
     } catch (err) {
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const moveTeam = async (index, direction) => {
+    const list = teamsInSelectedBlock
+    const otherIndex = index + direction
+    if (otherIndex < 0 || otherIndex >= list.length) return
+    const reordered = [...list]
+    ;[reordered[index], reordered[otherIndex]] = [reordered[otherIndex], reordered[index]]
+    setDocuments((prev) => {
+      const others = prev.filter((d) => (d.block || d.title) !== selectedBlock)
+      return [...others, ...reordered]
+    })
+    try {
+      await apiFetch(`/api/knowledge/areas/${selectedArea.id}/documents/reorder`, { method: 'PUT', body: JSON.stringify({ ids: reordered.map((d) => d.id) }) })
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -152,7 +231,7 @@ export default function Knowledge() {
     setSaving(true)
     try {
       await apiFetch(`/api/knowledge/areas/${renamingAreaId}`, { method: 'PATCH', body: JSON.stringify({ name: renameAreaValue.trim() }) })
-      setAreas((prev) => prev.map((a) => (a.id === renamingAreaId ? { ...a, name: renameAreaValue.trim() } : a)).sort((a, b) => a.name.localeCompare(b.name)))
+      setAreas((prev) => prev.map((a) => (a.id === renamingAreaId ? { ...a, name: renameAreaValue.trim() } : a)))
       if (selectedArea?.id === renamingAreaId) setSelectedArea((prev) => ({ ...prev, name: renameAreaValue.trim() }))
       setRenamingAreaId(null)
     } catch (err) {
@@ -172,6 +251,7 @@ export default function Knowledge() {
         body: JSON.stringify({ oldName: selectedBlock, newName: renameBlockValue.trim() }),
       })
       setDocuments((prev) => prev.map((d) => ((d.block || d.title) === selectedBlock ? { ...d, block: renameBlockValue.trim() } : d)))
+      setBlocks((prev) => prev.map((b) => (b === selectedBlock ? renameBlockValue.trim() : b)))
       setSelectedBlock(renameBlockValue.trim())
       setRenamingBlock(false)
     } catch (err) {
@@ -185,6 +265,7 @@ export default function Knowledge() {
     setTeamMetaTitle(selectedDoc.title)
     setTeamMetaBlock(selectedDoc.block || selectedDoc.title)
     setTeamMetaAreaId(selectedDoc.areaId || selectedArea?.id || '')
+    setTeamMetaVisibility(selectedDoc.visibility || 'private')
     setEditingTeam(true)
   }
 
@@ -193,13 +274,17 @@ export default function Knowledge() {
     if (!selectedDoc) return
     setSaving(true)
     try {
-      const patch = { title: teamMetaTitle.trim(), block: teamMetaBlock.trim(), areaId: teamMetaAreaId }
+      const patch = { title: teamMetaTitle.trim(), block: teamMetaBlock.trim(), areaId: teamMetaAreaId, visibility: teamMetaVisibility }
       const updated = await apiFetch(`/api/knowledge/documents/${selectedDoc.id}/meta`, { method: 'PATCH', body: JSON.stringify(patch) })
       setSelectedDoc(updated)
       setEditingTeam(false)
       if (selectedArea) {
-        const { documents: docs } = await apiFetch(`/api/knowledge/areas/${selectedArea.id}/documents`)
+        const [{ documents: docs }, { blocks: freshBlocks }] = await Promise.all([
+          apiFetch(`/api/knowledge/areas/${selectedArea.id}/documents`),
+          apiFetch(`/api/knowledge/areas/${selectedArea.id}/blocks`),
+        ])
         setDocuments(docs)
+        setBlocks(freshBlocks)
         // The team may have moved to a different block, or out of this area entirely.
         if (patch.areaId !== selectedArea.id) {
           setSelectedDoc(null)
@@ -240,15 +325,11 @@ export default function Knowledge() {
 
   const latestVersion = selectedDoc?.versions?.[selectedDoc.versions.length - 1]
 
-  // Group the expanded area's teams (documents) by the "bloque" they belong
-  // to — a team with no block set is its own standalone block (server
-  // already defaults `block` to the team's own title).
   const documentsByBlock = documents.reduce((acc, d) => {
     const block = d.block || d.title
     ;(acc[block] ||= []).push(d)
     return acc
   }, {})
-  const blockNames = Object.keys(documentsByBlock)
   const teamsInSelectedBlock = selectedBlock ? documentsByBlock[selectedBlock] || [] : []
 
   return (
@@ -258,19 +339,14 @@ export default function Knowledge() {
           <h2>Centro de conocimiento</h2>
           <div className="info-note" style={{ marginTop: 10 }}>
             <svg className="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v5h1" /></svg>
-            <span>Documentos y procesos de cada área, con historial de versiones. Cualquiera puede consultarlos, sin necesidad de estar tomando ningún curso.</span>
+            <span>Cada unidad de negocio tiene bloques, y cada bloque sus equipos de trabajo. Un equipo es "público" (cualquiera en la compañía lo puede leer) o "privado" (solo su propia unidad/bloque).</span>
           </div>
         </div>
         {canPublish(profile?.role) && (
           <div className="panel-head-actions">
-            <button className="btn btn-ghost" onClick={() => setShowAreaForm((v) => !v)}>+ Área</button>
-            <button
-              className="btn btn-primary"
-              disabled={!selectedArea}
-              onClick={() => setShowDocForm((v) => !v)}
-            >
-              + Publicar equipo
-            </button>
+            <button className="btn btn-ghost" onClick={() => setShowAreaForm((v) => !v)}>+ Unidad de negocio</button>
+            <button className="btn btn-ghost" disabled={!selectedArea} onClick={() => setShowBlockForm((v) => !v)}>+ Bloque</button>
+            <button className="btn btn-primary" disabled={!selectedArea} onClick={() => setShowDocForm((v) => !v)}>+ Equipo de trabajo</button>
           </div>
         )}
       </div>
@@ -278,14 +354,14 @@ export default function Knowledge() {
       {error && <div className="info-note" style={{ margin: '16px 0' }}><span>{error}</span></div>}
 
       <datalist id="kb-block-suggestions">
-        {blockNames.map((b) => <option key={b} value={b} />)}
+        {blocks.map((b) => <option key={b} value={b} />)}
       </datalist>
 
       {showAreaForm && (
         <form onSubmit={createArea} className="card" style={{ padding: 16, marginBottom: 20 }}>
-          <div className="section-title">Nueva área</div>
+          <div className="section-title">Nueva unidad de negocio</div>
           <input
-            placeholder="Nombre del área"
+            placeholder="Nombre de la unidad"
             value={newAreaName}
             onChange={(e) => setNewAreaName(e.target.value)}
             style={{ display: 'block', width: '100%', marginBottom: 10 }}
@@ -296,7 +372,23 @@ export default function Knowledge() {
             onChange={(e) => setNewAreaDescription(e.target.value)}
             style={{ display: 'block', width: '100%', marginBottom: 10 }}
           />
-          <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Crear área</button>
+          <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Crear unidad</button>
+        </form>
+      )}
+
+      {showBlockForm && selectedArea && (
+        <form onSubmit={createBlock} className="card" style={{ padding: 16, marginBottom: 20 }}>
+          <div className="section-title">Nuevo bloque en {selectedArea.name}</div>
+          <p style={{ color: 'var(--text-dim)', fontSize: '.82rem', margin: '4px 0 10px' }}>
+            Crea el bloque vacío primero; luego agrégale equipos de trabajo desde "+ Equipo de trabajo".
+          </p>
+          <input
+            placeholder="Nombre del bloque"
+            value={newBlockName}
+            onChange={(e) => setNewBlockName(e.target.value)}
+            style={{ display: 'block', width: '100%', marginBottom: 10 }}
+          />
+          <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Crear bloque</button>
         </form>
       )}
 
@@ -329,6 +421,13 @@ export default function Knowledge() {
             onChange={(e) => setNewDocTags(e.target.value)}
             style={{ display: 'block', width: '100%', marginBottom: 10 }}
           />
+          <div className="field">
+            <label>Visibilidad</label>
+            <select value={newDocVisibility} onChange={(e) => setNewDocVisibility(e.target.value)}>
+              <option value="private">Privado — solo su propia unidad/bloque</option>
+              <option value="public">Público — toda la compañía</option>
+            </select>
+          </div>
           <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Publicar</button>
         </form>
       )}
@@ -367,11 +466,15 @@ export default function Knowledge() {
                   </svg>
                 </button>
                 {canPublish(profile?.role) && (
-                  <button
-                    className="kb-edit-btn"
-                    title="Renombrar área"
-                    onClick={() => { setRenamingAreaId(a.id); setRenameAreaValue(a.name) }}
-                  >✎</button>
+                  <>
+                    <button className="kb-edit-btn" title="Mover arriba" disabled={i === 0} onClick={() => moveArea(i, -1)}>↑</button>
+                    <button className="kb-edit-btn" title="Mover abajo" disabled={i === areas.length - 1} onClick={() => moveArea(i, 1)}>↓</button>
+                    <button
+                      className="kb-edit-btn"
+                      title="Renombrar unidad"
+                      onClick={() => { setRenamingAreaId(a.id); setRenameAreaValue(a.name) }}
+                    >✎</button>
+                  </>
                 )}
               </div>
               {renamingAreaId === a.id && (
@@ -383,16 +486,23 @@ export default function Knowledge() {
               )}
               {selectedArea?.id === a.id && (
                 <div className="kb-block-list">
-                  {blockNames.map((block) => (
-                    <button
-                      key={block}
-                      className={`kb-block-item ${selectedBlock === block ? 'on' : ''}`}
-                      onClick={() => openBlock(block)}
-                    >
-                      {block}
-                    </button>
+                  {blocks.map((block, bi) => (
+                    <div key={block} className="kb-block-row">
+                      <button
+                        className={`kb-block-item ${selectedBlock === block ? 'on' : ''}`}
+                        onClick={() => openBlock(block)}
+                      >
+                        {block}
+                      </button>
+                      {canPublish(profile?.role) && (
+                        <>
+                          <button className="kb-edit-btn" title="Mover arriba" disabled={bi === 0} onClick={() => moveBlock(bi, -1)}>↑</button>
+                          <button className="kb-edit-btn" title="Mover abajo" disabled={bi === blocks.length - 1} onClick={() => moveBlock(bi, 1)}>↓</button>
+                        </>
+                      )}
+                    </div>
                   ))}
-                  {blockNames.length === 0 && <p className="kb-empty">Sin bloques todavía.</p>}
+                  {blocks.length === 0 && <p className="kb-empty">Sin bloques todavía.</p>}
                 </div>
               )}
             </div>
@@ -420,12 +530,21 @@ export default function Knowledge() {
                   <button className="btn-text" type="button" onClick={() => setRenamingBlock(false)}>Cancelar</button>
                 </form>
               )}
-              {teamsInSelectedBlock.map((d) => (
-                <button key={d.id} className={`kb-team ${selectedDoc?.id === d.id ? 'on' : ''}`} onClick={() => openDoc(d)}>
-                  <span>{d.title}</span>
-                  <em>v{d.currentVersion || 1}</em>
-                </button>
+              {teamsInSelectedBlock.map((d, ti) => (
+                <div key={d.id} className="kb-team-row">
+                  <button className={`kb-team ${selectedDoc?.id === d.id ? 'on' : ''}`} onClick={() => openDoc(d)}>
+                    <span>{d.title}{d.visibility === 'public' ? ' 🌐' : ''}</span>
+                    <em>v{d.currentVersion || 1}</em>
+                  </button>
+                  {canPublish(profile?.role) && (
+                    <>
+                      <button className="kb-edit-btn" title="Mover arriba" disabled={ti === 0} onClick={() => moveTeam(ti, -1)}>↑</button>
+                      <button className="kb-edit-btn" title="Mover abajo" disabled={ti === teamsInSelectedBlock.length - 1} onClick={() => moveTeam(ti, 1)}>↓</button>
+                    </>
+                  )}
+                </div>
               ))}
+              {teamsInSelectedBlock.length === 0 && <p className="kb-empty">Este bloque aún no tiene equipos — usa "+ Equipo de trabajo" arriba.</p>}
             </>
           ) : (
             <p className="kb-empty">Selecciona un bloque para ver sus equipos de trabajo.</p>
@@ -446,9 +565,7 @@ export default function Knowledge() {
               <div className="kb-reader-meta">
                 <span>✍️ {latestVersion?.updatedByEmail || 'sin especificar'}</span>
                 <span>🕓 versión {selectedDoc.currentVersion || 1}</span>
-                {canPublish(profile?.role) && (
-                  <button className="btn-text" onClick={() => setShowVersionForm((v) => !v)}>Nueva versión</button>
-                )}
+                <span>{selectedDoc.visibility === 'public' ? '🌐 Público (toda la compañía)' : '🔒 Privado (solo esta unidad/bloque)'}</span>
               </div>
 
               {editingTeam && (
@@ -464,24 +581,40 @@ export default function Knowledge() {
                       {areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
                   </div>
+                  <div className="field"><label>Visibilidad</label>
+                    <select value={teamMetaVisibility} onChange={(e) => setTeamMetaVisibility(e.target.value)}>
+                      <option value="private">Privado — solo su propia unidad/bloque</option>
+                      <option value="public">Público — toda la compañía</option>
+                    </select>
+                  </div>
                   <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Guardar cambios</button>
                 </form>
               )}
 
-              {showVersionForm && (
-                <form onSubmit={addVersion} className="card" style={{ padding: 16, marginBottom: 18 }}>
-                  <textarea
-                    placeholder="Contenido de la nueva versión"
-                    value={newVersionContent}
-                    onChange={(e) => setNewVersionContent(e.target.value)}
-                    rows={6}
-                    style={{ display: 'block', width: '100%', marginBottom: 10 }}
-                  />
-                  <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Guardar versión</button>
-                </form>
-              )}
-
               <div className="kb-reader-body">{selectedDoc.content}</div>
+
+              {canPublish(profile?.role) && (
+                <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border-soft)' }}>
+                  <button className="btn-text" onClick={() => setShowVersionForm((v) => !v)}>
+                    {showVersionForm ? 'Cancelar' : 'Actualizar contenido'}
+                  </button>
+                  <p style={{ color: 'var(--text-dim)', fontSize: '.78rem', margin: '4px 0 0' }}>
+                    Reemplaza el texto de arriba por uno nuevo. La versión anterior queda guardada en el historial (no se pierde).
+                  </p>
+                  {showVersionForm && (
+                    <form onSubmit={addVersion} className="card" style={{ padding: 16, marginTop: 10 }}>
+                      <textarea
+                        placeholder="Contenido nuevo (reemplaza el actual)"
+                        value={newVersionContent}
+                        onChange={(e) => setNewVersionContent(e.target.value)}
+                        rows={6}
+                        style={{ display: 'block', width: '100%', marginBottom: 10 }}
+                      />
+                      <button className="btn btn-primary btn-sm" type="submit" disabled={saving}>Guardar como versión {(selectedDoc.currentVersion || 1) + 1}</button>
+                    </form>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <p className="kb-empty">Selecciona un equipo de trabajo para leerlo.</p>

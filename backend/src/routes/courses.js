@@ -7,7 +7,7 @@ const { validate } = require('../lib/validate');
 const { asyncRoute } = require('../middleware/errorHandler');
 const { renderCertificate } = require('../lib/certificate');
 const { notifyCourseUpdate } = require('../lib/courseNotifications');
-const { syncEnrollmentsForCourse } = require('../lib/enrollmentSync');
+const { syncEnrollmentsForCourse, matchesAssignment } = require('../lib/enrollmentSync');
 
 const router = express.Router();
 
@@ -41,10 +41,14 @@ const createCourseSchema = z.object({
   description: z.string().trim().optional(),
   area: z.string().trim().optional().nullable(),
   modules: z.array(moduleInputSchema).optional(),
-  // Which business units (knowledgeAreas ids) / blocks this course targets.
-  // Empty arrays mean "open to everyone" — see isVisibleTo().
+  // Which business units / blocks / specific teams (knowledgeAreas ids,
+  // block names, knowledgeDocuments ids) this course targets. Each is an
+  // independently-sufficient scope (see matchesAssignment in
+  // lib/enrollmentSync.js) — all three empty means "open to everyone".
   assignedAreaIds: z.array(z.string()).optional(),
   assignedBlocks: z.array(z.string()).optional(),
+  assignedTeamIds: z.array(z.string()).optional(),
+  order: z.number().optional(),
 });
 
 const updateCourseSchema = z.object({
@@ -54,11 +58,15 @@ const updateCourseSchema = z.object({
   modules: z.array(moduleInputSchema).optional(),
   assignedAreaIds: z.array(z.string()).optional(),
   assignedBlocks: z.array(z.string()).optional(),
+  assignedTeamIds: z.array(z.string()).optional(),
+  order: z.number().optional(),
   // Providing a non-empty updateNote is what marks this as a real "update
   // announcement": it stamps updatedAt/updateNote (shown as a badge) and
   // triggers the notification email. Editing without one is a silent fix.
   updateNote: z.string().trim().optional(),
 });
+
+const reorderSchema = z.object({ ids: z.array(z.string()).min(1) });
 
 const progressSchema = z.object({
   moduleId: z.string().min(1, 'Falta moduleId'),
@@ -97,16 +105,11 @@ function computeProgress(modules, completedModules) {
 }
 
 // Course is visible to `user` if it's open to everyone (no assignment set),
-// the user's own business unit/block matches, or the user has a role that
-// manages/oversees the whole catalog regardless of assignment.
+// the user's own business unit/block/team matches (see matchesAssignment),
+// or the user has a role that manages/oversees the whole catalog regardless
+// of assignment.
 function isVisibleTo(course, user) {
-  if (seesEverything(user.role)) return true;
-  const areaIds = course.assignedAreaIds || [];
-  const blocks = course.assignedBlocks || [];
-  if (areaIds.length === 0 && blocks.length === 0) return true;
-  if (areaIds.length && !areaIds.includes(user.areaId)) return false;
-  if (blocks.length && !blocks.includes(user.block)) return false;
-  return true;
+  return seesEverything(user.role) || matchesAssignment(course, user);
 }
 
 const courseRef = (id) => db.collection('courses').doc(id);
@@ -127,9 +130,23 @@ function courseSummary(course, role) {
     modules: visibleModulesFor(course, role),
     assignedAreaIds: course.assignedAreaIds || [],
     assignedBlocks: course.assignedBlocks || [],
+    assignedTeamIds: course.assignedTeamIds || [],
+    order: course.order ?? null,
     updatedAt: course.updatedAt || null,
     updateNote: course.updateNote || null,
   };
+}
+
+// Explicit `order` first (ascending), undefined/null last, title as a
+// stable tiebreaker — keeps a numbered path ("Módulo 1", "Módulo 2", ...)
+// in the sequence it was given rather than Firestore's arbitrary order.
+function sortByOrder(courses) {
+  return [...courses].sort((a, b) => {
+    const ao = a.order ?? Infinity;
+    const bo = b.order ?? Infinity;
+    if (ao !== bo) return ao - bo;
+    return (a.title || '').localeCompare(b.title || '');
+  });
 }
 
 // 1. Create a course.
@@ -143,6 +160,8 @@ router.post('/', canManageCourses, asyncRoute(async (req, res) => {
     modules,
     assignedAreaIds: data.assignedAreaIds || [],
     assignedBlocks: data.assignedBlocks || [],
+    assignedTeamIds: data.assignedTeamIds || [],
+    order: data.order ?? null,
     updatedAt: null,
     updateNote: null,
     instructorUid: req.user.uid,
@@ -166,7 +185,7 @@ router.get('/', asyncRoute(async (req, res) => {
 
   if (req.query.mine === 'true') {
     const results = [];
-    for (const course of courses) {
+    for (const course of sortByOrder(courses)) {
       const enrollSnap = await enrollmentRef(course.id, req.user.uid).get();
       if (!enrollSnap.exists) continue;
       results.push({
@@ -178,9 +197,9 @@ router.get('/', asyncRoute(async (req, res) => {
   }
 
   // Not "my courses": only show what this user is actually allowed to take,
-  // per its business-unit/block assignment (roles that manage the catalog
-  // see everything — see isVisibleTo).
-  const visible = courses.filter((c) => isVisibleTo(c, req.user));
+  // per its business-unit/block/team assignment (roles that manage the
+  // catalog see everything — see isVisibleTo).
+  const visible = sortByOrder(courses.filter((c) => isVisibleTo(c, req.user)));
   const filtered = req.query.area ? visible.filter((c) => c.area === req.query.area) : visible;
   const results = [];
   for (const course of filtered) {
@@ -188,6 +207,16 @@ router.get('/', asyncRoute(async (req, res) => {
     results.push({ ...courseSummary(course, req.user.role), enrolled: enrollSnap.exists });
   }
   res.json({ courses: results });
+}));
+
+// Reorder courses (typically within one `area` catalog at a time) — sets
+// `order` = position in the given id list. Managing roles only.
+router.put('/reorder', canManageCourses, asyncRoute(async (req, res) => {
+  const { ids } = validate(reorderSchema, req.body);
+  const batch = db.batch();
+  ids.forEach((id, i) => batch.update(courseRef(id), { order: i }));
+  await batch.commit();
+  res.json({ reordered: ids.length });
 }));
 
 // 3. Single course + the current user's own progress.
@@ -226,6 +255,8 @@ router.patch('/:id', canManageCourses, asyncRoute(async (req, res) => {
   if (data.area !== undefined) patch.area = data.area;
   if (data.assignedAreaIds !== undefined) patch.assignedAreaIds = data.assignedAreaIds;
   if (data.assignedBlocks !== undefined) patch.assignedBlocks = data.assignedBlocks;
+  if (data.assignedTeamIds !== undefined) patch.assignedTeamIds = data.assignedTeamIds;
+  if (data.order !== undefined) patch.order = data.order;
   if (data.modules !== undefined) {
     patch.modules = data.modules.map((m, i) => buildModule(m, i));
   }
